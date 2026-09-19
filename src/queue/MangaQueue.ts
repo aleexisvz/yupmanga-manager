@@ -1,0 +1,124 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { QUEUE_FILE_PATH } from '../config/defaults.js';
+import type { MangaEntry } from '../config/types.js';
+import { logger } from '../logger.js';
+
+export class MangaQueue {
+  private entries: MangaEntry[] = [];
+
+  constructor() {
+    this.ensureFileExists();
+  }
+
+  private async ensureFileExists(): Promise<void> {
+    try {
+      await fs.mkdir(path.dirname(QUEUE_FILE_PATH), { recursive: true });
+      await fs.access(QUEUE_FILE_PATH);
+    } catch {
+      await fs.writeFile(QUEUE_FILE_PATH, '[]', 'utf-8');
+    }
+  }
+
+  async load(): Promise<MangaEntry[]> {
+    await this.ensureFileExists();
+    try {
+      const content = await fs.readFile(QUEUE_FILE_PATH, 'utf-8');
+      this.entries = JSON.parse(content);
+    } catch {
+      this.entries = [];
+    }
+    return this.entries;
+  }
+
+  async save(): Promise<void> {
+    await this.ensureFileExists();
+    await fs.writeFile(QUEUE_FILE_PATH, JSON.stringify(this.entries, null, 2), 'utf-8');
+  }
+
+  async add(url: string, title: string): Promise<MangaEntry> {
+    await this.load();
+
+    const existing = this.entries.find((m) => m.url === url);
+    if (existing) {
+      existing.status = 'queued';
+      await this.save();
+      return existing;
+    }
+
+    const newEntry: MangaEntry = {
+      url,
+      title,
+      priority: this.entries.length + 1,
+      status: 'queued',
+      addedAt: new Date().toISOString(),
+    };
+
+    this.entries.push(newEntry);
+    await this.save();
+    logger.info(`➕ Manga agregado a la cola: "${title}" (${url})`);
+    return newEntry;
+  }
+
+  async remove(url: string): Promise<boolean> {
+    await this.load();
+    const initialLength = this.entries.length;
+    this.entries = this.entries.filter((m) => m.url !== url);
+
+    if (this.entries.length !== initialLength) {
+      await this.save();
+      logger.info(`🗑️ Manga eliminado de la cola: ${url}`);
+      return true;
+    }
+
+    return false;
+  }
+
+  async list(): Promise<MangaEntry[]> {
+    return this.load();
+  }
+
+  /**
+   * Obtiene el siguiente manga elegible para leer (ordenado por prioridad)
+   */
+  async getNext(): Promise<MangaEntry | null> {
+    await this.load();
+
+    // 1. Buscar el que esté en progreso de lectura
+    const reading = this.entries.find((m) => m.status === 'reading');
+    if (reading) return reading;
+
+    // 2. Buscar el siguiente en cola por prioridad
+    const queued = this.entries
+      .filter((m) => m.status === 'queued')
+      .sort((a, b) => a.priority - b.priority);
+
+    if (queued.length > 0) {
+      queued[0].status = 'reading';
+      await this.save();
+      return queued[0];
+    }
+
+    return null;
+  }
+
+  async updateProgress(
+    url: string,
+    progress: Partial<NonNullable<MangaEntry['progress']>>,
+    status?: MangaEntry['status']
+  ): Promise<void> {
+    await this.load();
+    const entry = this.entries.find((m) => m.url === url);
+    if (entry) {
+      entry.progress = {
+        ...entry.progress,
+        ...progress,
+      };
+      entry.lastReadAt = new Date().toISOString();
+      if (status) {
+        entry.status = status;
+      }
+      await this.save();
+    }
+  }
+}
