@@ -16,9 +16,9 @@ export const SELECTORS = {
   VOLUME_BADGE: '[class*="absolute"][class*="top-0"][class*="left-0"]',
   
   // Publicidad intermedia previa al reader
-  AD_MODAL_CONTAINER: 'div:has-text("Un momento y podrás seguir leyendo")',
+  AD_MODAL_CONTAINER: 'div:has-text("Un momento y podrás seguir leyendo"), div:has(#btn-continue)',
   AD_COUNTDOWN_TEXT: 'text=/Espera \\d+ segundos/i',
-  AD_CONTINUE_BUTTON: 'button:has-text("Continuar"), a:has-text("Continuar")',
+  AD_CONTINUE_BUTTON: '#btn-continue, a:has-text("Continuar al capítulo"), a:has-text("Continuar al capitulo"), button:has-text("Continuar")',
 
   // Reader
   READER_PAGE_INFO: 'text=/Página\\s+\\d+\\s+de\\s+\\d+/i',

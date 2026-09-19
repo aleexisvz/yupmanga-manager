@@ -13,38 +13,39 @@ export interface ReadingSessionResult {
 
 export class ReaderAutomation {
   /**
-   * Detects and waits for the pre-reader countdown ad ("Wait X seconds...")
+   * Detects and waits for the pre-reader countdown ad, then clicks #btn-continue
    */
-  async handlePreReaderAd(page: Page): Promise<void> {
+  async handlePreReaderAd(page: Page): Promise<boolean> {
     try {
-      // Check if ad modal container exists
-      const adModal = page.locator('div:has-text("Un momento y podrás seguir leyendo")');
-      const isVisible = await adModal.isVisible({ timeout: 2500 }).catch(() => false);
+      const continueBtn = page
+        .locator('#btn-continue, a:has-text("Continuar al capítulo"), button:has-text("Continuar al capítulo")')
+        .first();
 
-      if (!isVisible) return;
+      // Check if either the ad container or the continue button is present on the page
+      const hasAdOrBtn =
+        (await page.locator('text="Un momento y podrás seguir leyendo"').count()) > 0 ||
+        (await page.locator('text=/Espera \\d+ segundos/i').count()) > 0 ||
+        (await continueBtn.count()) > 0;
 
-      logger.info('[READER] Interstitial ad screen detected. Waiting for countdown to finish...');
+      if (!hasAdOrBtn) return false;
 
-      // Look for button that says "Continuar"
-      const continueBtn = page.locator('button, a').filter({ hasText: /continuar/i }).first();
+      logger.info('[READER] Interstitial ad detected. Waiting for countdown to finish...');
 
-      // Wait up to 14s for countdown to finish and continue button to become visible
-      await continueBtn.waitFor({ state: 'visible', timeout: 14_000 }).catch(() => {
-        logger.debug('[READER] Waiting for ad container to transition...');
-      });
+      // Wait up to 18 seconds for the #btn-continue button to become visible
+      await continueBtn.waitFor({ state: 'visible', timeout: 18_000 });
 
-      await sleep(uglyRandom(900, 1800));
+      logger.info('[READER] Button "Continuar al capítulo" is now active. Clicking it...');
+      await sleep(uglyRandom(900, 1600));
+      await continueBtn.click();
 
-      if (await continueBtn.isVisible().catch(() => false)) {
-        logger.info('[READER] Clicking "Continuar" to open reader...');
-        await continueBtn.click();
-      } else {
-        await adModal.waitFor({ state: 'hidden', timeout: 8_000 }).catch(() => {});
-      }
-
+      logger.info('[READER] Successfully clicked "Continuar al capítulo". Transitioning to reader...');
+      await page.waitForLoadState('domcontentloaded');
       await sleep(uglyRandom(1500, 2500));
+
+      return true;
     } catch (error) {
-      logger.debug({ error }, '[READER] Error handling pre-reader ad');
+      logger.debug({ error }, '[READER] Note on pre-reader ad transition');
+      return false;
     }
   }
 
@@ -139,8 +140,17 @@ export class ReaderAutomation {
     let initialInfo = await this.getPageInfo(page);
     if (!initialInfo) {
       logger.info('[READER] Waiting for reader page elements to load...');
-      for (let attempt = 0; attempt < 5; attempt++) {
+      for (let attempt = 0; attempt < 8; attempt++) {
         await sleep(1500);
+
+        // Double check: if #btn-continue is still visible, click it
+        const continueBtn = page.locator('#btn-continue, a:has-text("Continuar al capítulo")').first();
+        if (await continueBtn.isVisible().catch(() => false)) {
+          logger.info('[READER] Re-clicking "Continuar al capítulo" to ensure entry...');
+          await continueBtn.click();
+          await page.waitForLoadState('domcontentloaded');
+        }
+
         initialInfo = await this.getPageInfo(page);
         if (initialInfo) break;
       }
