@@ -25,11 +25,11 @@ export class ActionScheduler {
     const weights: Record<ActionType, number> = { ...this.config.behavior.weights };
     const now = Date.now();
 
-    // 1. Ajustes dinámicos según fatiga de lectura
-    if (context.pagesReadInCurrentSession >= 25) {
+    // 1. Ajustes dinámicos según fatiga de lectura (ahora adaptado a sesiones de 30-100 páginas)
+    if (context.pagesReadInCurrentSession >= 70) {
       weights.short_break += 20;
       weights.scroll_around += 15;
-      weights.read_pages = Math.max(20, weights.read_pages - 25);
+      weights.read_pages = Math.max(25, weights.read_pages - 25);
     }
 
     // 2. Si acaba de leer muchas páginas continuas y lleva más de 60 min, fomentar descanso

@@ -136,7 +136,13 @@ export class ReaderAutomation {
     let volumeCompleted = false;
     let lastInfo: PageInfo = { currentPage: 1, totalPages: 1 };
 
-    logger.info(`📖 Iniciando bloque de lectura (meta objetivo: ${targetPagesCount} páginas)...`);
+    // En cada sesión de lectura, el porcentaje de variación se calcula aleatoriamente entre 30% y 60% con decimales
+    const sessionVariation = uglyRandom(30, 60);
+    logger.info(
+      `📖 Iniciando bloque de lectura (meta: ${targetPagesCount} págs, ritmo base: ${
+        config.intervalMs / 1000
+      }s con variación de ±${sessionVariation}%)...`
+    );
 
     while (pagesRead < targetPagesCount) {
       if (signal?.aborted) break;
@@ -154,9 +160,9 @@ export class ReaderAutomation {
         }
       }
 
-      // Intervalo entre páginas con variación y multiplicador según la hora
+      // Intervalo entre páginas usando la variación dinámica de la sesión y el multiplicador de hora
       const timeMultiplier = getTimeMultiplier();
-      const baseDelay = randomInterval(config.intervalMs, config.variationPercent);
+      const baseDelay = randomInterval(config.intervalMs, sessionVariation);
       const delay = Math.round(baseDelay * timeMultiplier);
 
       await sleep(delay, signal);

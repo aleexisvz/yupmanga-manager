@@ -35,28 +35,28 @@ export const SELECTORS = {
 
 export const DEFAULT_CONFIG: AppConfig = {
   runMode: 'headless',
-  intervalMs: 5200,
-  variationPercent: 25,
+  intervalMs: 15_000,          // 15 segundos base por página
+  variationPercent: 45,        // Variación base (se vuelve dinámica por sesión entre 30% y 60%)
   mode: 'keyboard',
   proxy: undefined,
   behavior: {
     weights: {
-      read_pages: 60,
-      scroll_around: 12,
+      read_pages: 65,
+      scroll_around: 10,
       short_break: 8,
       visit_home: 5,
       visit_profile: 4,
-      visit_categories: 4,
-      browse_manga: 4,
-      long_break: 3,
+      visit_categories: 3,
+      browse_manga: 3,
+      long_break: 2,
     },
-    shortBreakMinMs: 45_000,     // 45 segundos
-    shortBreakMaxMs: 165_000,    // ~2.75 minutos
-    longBreakMinMs: 420_000,     // ~7 minutos
-    longBreakMaxMs: 1_260_000,   // ~21 minutos
+    shortBreakMinMs: 60_000,     // 1 minuto
+    shortBreakMaxMs: 240_000,    // 4 minutos
+    longBreakMinMs: 480_000,     // 8 minutos
+    longBreakMaxMs: 1_200_000,   // 20 minutos
     pagesPerReadingSession: {
-      min: 8,
-      max: 32,
+      min: 30,                   // Mínimo 30 páginas para asegurar guardado de progreso
+      max: 100,                  // Máximo 100 páginas por sesión
     },
   },
   antiDetection: {
