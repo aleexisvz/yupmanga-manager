@@ -66,7 +66,18 @@ export class BrowserManager {
     try {
       this.context = await chromium.launchPersistentContext(USER_DATA_DIR, launchOptions);
     } catch (err: any) {
-      if (launchOptions.channel === 'chrome') {
+      if (err?.message?.includes('ProcessSingleton') || err?.message?.includes('Lock file')) {
+        logger.warn('[BROWSER] Profile lock held by closing browser. Waiting 2 seconds and retrying...');
+        await sleep(2000);
+        try {
+          this.context = await chromium.launchPersistentContext(USER_DATA_DIR, launchOptions);
+        } catch {
+          // If still locked, try with bundled Chromium
+          logger.warn('[BROWSER] Retrying with bundled Chromium...');
+          delete launchOptions.channel;
+          this.context = await chromium.launchPersistentContext(USER_DATA_DIR, launchOptions);
+        }
+      } else if (launchOptions.channel === 'chrome') {
         logger.warn('[BROWSER] Chrome channel unavailable. Falling back to bundled Chromium...');
         delete launchOptions.channel;
         this.context = await chromium.launchPersistentContext(USER_DATA_DIR, launchOptions);

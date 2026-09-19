@@ -48,9 +48,9 @@ program
 async function checkAccountStatus(): Promise<void> {
   const config = await ConfigLoader.load();
   const browser = new BrowserManager();
-  console.log(chalk.cyan('\n[AUTH] Verifying authentication on yupmanga.com...'));
+  console.log(chalk.cyan(`\n[AUTH] Verifying authentication on yupmanga.com (mode: ${config.runMode})...`));
 
-  const page = await browser.launch({ ...config, runMode: 'headless' });
+  const page = await browser.launch(config);
   const auth = await browser.checkAuth(page);
   await browser.close();
 
