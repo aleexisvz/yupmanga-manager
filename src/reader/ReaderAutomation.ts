@@ -13,15 +13,16 @@ export interface ReadingSessionResult {
 
 export class ReaderAutomation {
   /**
-   * Detects and waits for the pre-reader countdown ad, then clicks #btn-continue
+   * Universal interstitial ad handler (handles both entry ads and exit ads)
    */
-  async handlePreReaderAd(page: Page): Promise<boolean> {
+  async handleAdIfPresent(page: Page, contextDescription = 'Reader'): Promise<boolean> {
     try {
       const continueBtn = page
-        .locator('#btn-continue, a:has-text("Continuar al capítulo"), button:has-text("Continuar al capítulo")')
+        .locator(
+          '#btn-continue, a:has-text("Continuar al capítulo"), button:has-text("Continuar al capítulo"), a:has-text("Continuar"), button:has-text("Continuar"), a:has-text("Volver"), button:has-text("Volver")'
+        )
         .first();
 
-      // Check if either the ad container or the continue button is present on the page
       const hasAdOrBtn =
         (await page.locator('text="Un momento y podrás seguir leyendo"').count()) > 0 ||
         (await page.locator('text=/Espera \\d+ segundos/i').count()) > 0 ||
@@ -29,24 +30,31 @@ export class ReaderAutomation {
 
       if (!hasAdOrBtn) return false;
 
-      logger.info('[READER] Interstitial ad detected. Waiting for countdown to finish...');
+      logger.info(`[AD] Interstitial ad detected [${contextDescription}]. Waiting for countdown to finish...`);
 
-      // Wait up to 18 seconds for the #btn-continue button to become visible
+      // Wait up to 18 seconds for the continue/dismiss button to become active
       await continueBtn.waitFor({ state: 'visible', timeout: 18_000 });
 
-      logger.info('[READER] Button "Continuar al capítulo" is now active. Clicking it...');
+      logger.info(`[AD] Countdown finished [${contextDescription}]. Clicking continue button...`);
       await sleep(uglyRandom(900, 1600));
       await continueBtn.click();
 
-      logger.info('[READER] Successfully clicked "Continuar al capítulo". Transitioning to reader...');
+      logger.info(`[AD] Successfully dismissed ad [${contextDescription}].`);
       await page.waitForLoadState('domcontentloaded');
       await sleep(uglyRandom(1500, 2500));
 
       return true;
     } catch (error) {
-      logger.debug({ error }, '[READER] Note on pre-reader ad transition');
+      logger.debug({ error }, '[AD] Note on ad transition');
       return false;
     }
+  }
+
+  /**
+   * Backward-compatible alias for entry ads
+   */
+  async handlePreReaderAd(page: Page): Promise<boolean> {
+    return this.handleAdIfPresent(page, 'Opening reader');
   }
 
   /**
@@ -106,6 +114,11 @@ export class ReaderAutomation {
         await sleep(uglyRandom(800, 1600));
         await closeBtn.click();
         await page.waitForLoadState('domcontentloaded');
+        await sleep(uglyRandom(1200, 2000));
+
+        // Handle exit ad if YupManga displays an interstitial countdown upon closing the reader!
+        await this.handleAdIfPresent(page, 'Exiting reader');
+
         return true;
       }
       return false;
