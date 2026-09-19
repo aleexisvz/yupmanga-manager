@@ -42,17 +42,7 @@ export class SessionOrchestrator {
 
     logger.info('[SESSION] Autonomous reading session started.');
 
-    // Check Cloudflare on initial page load
-    if (await this.browser.isCloudflareBlocked(page)) {
-      logger.warn('*******************************************************************');
-      logger.warn('[CLOUDFLARE] Cloudflare verification required (Attention Required!).');
-      logger.warn('[CLOUDFLARE] Please run "npm run dev -- setup" to refresh your token.');
-      logger.warn('*******************************************************************');
-      await this.stop();
-      return;
-    }
-
-    // Verify account authentication status
+    // 1. Verify account authentication status (with Cloudflare wait if challenged)
     const auth = await this.browser.checkAuth(page);
     if (auth.isLoggedIn) {
       logger.info(
@@ -69,12 +59,13 @@ export class SessionOrchestrator {
 
     try {
       while (this.isRunning) {
+        // 2. Proactive Cloudflare check: wait for user to solve if present instead of closing
         if (await this.browser.isCloudflareBlocked(page)) {
-          logger.warn('*******************************************************************');
-          logger.warn('[CLOUDFLARE] Cloudflare verification challenge detected on page.');
-          logger.warn('[CLOUDFLARE] Pausing session. Please run "npm run dev -- setup".');
-          logger.warn('*******************************************************************');
-          break;
+          const resolved = await this.browser.waitForCloudflareResolve(page);
+          if (!resolved) {
+            logger.warn('[CLOUDFLARE] Challenge unresolved. Stopping session.');
+            break;
+          }
         }
 
         const currentManga = await this.queue.getNext();
@@ -115,8 +106,8 @@ export class SessionOrchestrator {
         await this.ensureOnMangaOrReader(page, currentManga);
 
         if (await this.browser.isCloudflareBlocked(page)) {
-          logger.warn('[CLOUDFLARE] Challenge active on series page. Aborting reading block.');
-          return;
+          const resolved = await this.browser.waitForCloudflareResolve(page);
+          if (!resolved) return;
         }
 
         // Check if on gallery page, if so open next volume

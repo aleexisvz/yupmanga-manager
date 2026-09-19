@@ -3,6 +3,7 @@ import { chromium, type BrowserContext, type Page } from 'playwright';
 import { USER_DATA_DIR, BASE_URL } from '../config/defaults.js';
 import type { AppConfig, RunMode } from '../config/types.js';
 import { logger } from '../logger.js';
+import { sleep } from '../utils/delay.js';
 
 export interface AuthStatus {
   isLoggedIn: boolean;
@@ -74,7 +75,6 @@ export class BrowserManager {
       }
     }
 
-    // 1. Remove automation markers
     if (config.antiDetection.removeWebdriverFlag) {
       await this.context.addInitScript(() => {
         Object.defineProperty(navigator, 'webdriver', {
@@ -83,7 +83,7 @@ export class BrowserManager {
       });
     }
 
-    // 2. Mock Page Visibility so YupManga's reading timer ALWAYS registers progress in background!
+    // Mock document.hidden and visibilityState so YupManga's reading timers never pause in background
     await this.context.addInitScript(() => {
       try {
         Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
@@ -136,8 +136,6 @@ export class BrowserManager {
     }
 
     const page = context.pages().length > 0 ? context.pages()[0] : await context.newPage();
-    
-    // Go to manga page or base URL
     const targetUrl = mangaUrl || BASE_URL;
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
 
@@ -149,20 +147,78 @@ export class BrowserManager {
     });
   }
 
+  /**
+   * Accurate check for Cloudflare challenge screen
+   */
+  async isCloudflareBlocked(page: Page): Promise<boolean> {
+    try {
+      const title = await page.title();
+      if (
+        title.includes('Attention Required') ||
+        title.includes('Just a moment') ||
+        title.includes('Atención requerida') ||
+        title.includes('Cloudflare')
+      ) {
+        return true;
+      }
+
+      const hasTurnstile = await page
+        .locator('iframe[src*="challenges.cloudflare.com"], form#challenge-form, #cf-turnstile')
+        .count();
+      if (hasTurnstile > 0) {
+        return true;
+      }
+
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Waits for user to solve Cloudflare challenge if visible, rather than aborting instantly
+   */
+  async waitForCloudflareResolve(page: Page, timeoutMs = 120_000): Promise<boolean> {
+    if (!(await this.isCloudflareBlocked(page))) {
+      return true;
+    }
+
+    logger.warn('================================================================');
+    logger.warn('[CLOUDFLARE] Verification challenge detected!');
+    logger.warn('[CLOUDFLARE] Please click the verification checkbox in the open Chrome window.');
+    logger.warn('[CLOUDFLARE] Waiting up to 2 minutes for you to solve it...');
+    logger.warn('================================================================');
+
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      await sleep(1500);
+      if (!(await this.isCloudflareBlocked(page))) {
+        logger.info('[CLOUDFLARE] Verification passed! Resuming session...');
+        await sleep(2000);
+        return true;
+      }
+    }
+
+    logger.error('[CLOUDFLARE] Verification timed out after 2 minutes.');
+    return false;
+  }
+
   async checkAuth(page: Page): Promise<AuthStatus> {
     try {
       logger.info('[AUTH] Checking account authentication status on YupManga...');
       await page.goto('https://yupmanga.com/perfil', { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(2000);
 
-      const title = await page.title();
+      // If Cloudflare blocks /perfil, give user chance to solve it
+      if (await this.isCloudflareBlocked(page)) {
+        const resolved = await this.waitForCloudflareResolve(page);
+        if (!resolved) {
+          return { isLoggedIn: false };
+        }
+      }
+
       const content = await page.content();
       const url = page.url();
-
-      if (title.includes('Attention Required') || title.includes('Cloudflare') || content.includes('cf-challenge')) {
-        logger.warn('[AUTH] Cloudflare challenge active on /perfil');
-        return { isLoggedIn: false };
-      }
 
       const isLoginPage = url.includes('login') || url.includes('ingresar') || content.includes('Iniciar Sesión');
       if (isLoginPage) {
@@ -207,35 +263,6 @@ export class BrowserManager {
     } catch (error) {
       logger.debug({ error }, '[AUTH] Error checking authentication');
       return { isLoggedIn: false };
-    }
-  }
-
-  /**
-   * Comprehensive Cloudflare challenge detection
-   */
-  async isCloudflareBlocked(page: Page): Promise<boolean> {
-    try {
-      const title = await page.title();
-      const content = await page.content();
-
-      // Check title markers
-      const isChallengeTitle =
-        title.includes('Just a moment') ||
-        title.includes('Attention Required') ||
-        title.includes('Cloudflare') ||
-        title.includes('Atención requerida');
-
-      // Check content markers
-      const hasCloudflareMarkers =
-        content.includes('cf-challenge') ||
-        content.includes('cf-turnstile') ||
-        content.includes('challenge-platform') ||
-        content.includes('Verifica que eres humano') ||
-        content.includes('Ray ID:');
-
-      return isChallengeTitle || hasCloudflareMarkers;
-    } catch {
-      return false;
     }
   }
 
