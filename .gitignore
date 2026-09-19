@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.yupmanga/
+*.log
+.env
+.DS_Store
+Thumbs.db
