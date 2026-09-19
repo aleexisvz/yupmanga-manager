@@ -42,6 +42,16 @@ export class SessionOrchestrator {
 
     logger.info('[SESSION] Autonomous reading session started.');
 
+    // Check Cloudflare on initial page load
+    if (await this.browser.isCloudflareBlocked(page)) {
+      logger.warn('*******************************************************************');
+      logger.warn('[CLOUDFLARE] Cloudflare verification required (Attention Required!).');
+      logger.warn('[CLOUDFLARE] Please run "npm run dev -- setup" to refresh your token.');
+      logger.warn('*******************************************************************');
+      await this.stop();
+      return;
+    }
+
     // Verify account authentication status
     const auth = await this.browser.checkAuth(page);
     if (auth.isLoggedIn) {
@@ -60,8 +70,10 @@ export class SessionOrchestrator {
     try {
       while (this.isRunning) {
         if (await this.browser.isCloudflareBlocked(page)) {
-          logger.warn('[CLOUDFLARE] Challenge detected. Pausing session to protect IP address.');
-          logger.warn('[CLOUDFLARE] Please run "npm run dev -- setup" to refresh your verification token.');
+          logger.warn('*******************************************************************');
+          logger.warn('[CLOUDFLARE] Cloudflare verification challenge detected on page.');
+          logger.warn('[CLOUDFLARE] Pausing session. Please run "npm run dev -- setup".');
+          logger.warn('*******************************************************************');
           break;
         }
 
@@ -75,7 +87,7 @@ export class SessionOrchestrator {
         const action = this.scheduler.getNextAction(this.context);
         logger.info(`[SCHEDULER] Next action scheduled: [${action.type}]`);
 
-        await this.executeAction(page, action.type, action.pagesToRead || 40, currentManga);
+        await this.executeAction(page, action.type, action.pagesToRead || 45, currentManga);
 
         this.context.lastAction = action.type;
       }
@@ -102,6 +114,11 @@ export class SessionOrchestrator {
       case 'read_pages': {
         await this.ensureOnMangaOrReader(page, currentManga);
 
+        if (await this.browser.isCloudflareBlocked(page)) {
+          logger.warn('[CLOUDFLARE] Challenge active on series page. Aborting reading block.');
+          return;
+        }
+
         // Check if on gallery page, if so open next volume
         const isGallery = await this.gallery.isGalleryPage(page);
         if (isGallery) {
@@ -117,7 +134,7 @@ export class SessionOrchestrator {
               break;
             }
           }
-          await sleep(uglyRandom(1500, 3000));
+          await sleep(uglyRandom(2000, 4000));
         }
 
         // Execute reading block
@@ -125,21 +142,23 @@ export class SessionOrchestrator {
 
         this.context.pagesReadInCurrentSession += result.pagesRead;
 
-        await this.tracker.recordSession(
-          currentManga.url,
-          currentManga.title,
-          result.pagesRead,
-          result.volumeCompleted,
-          undefined,
-          result.currentPage
-        );
+        if (result.pagesRead > 0) {
+          await this.tracker.recordSession(
+            currentManga.url,
+            currentManga.title,
+            result.pagesRead,
+            result.volumeCompleted,
+            undefined,
+            result.currentPage
+          );
 
-        await this.queue.updateProgress(currentManga.url, {
-          lastPage: result.currentPage,
-          totalPages: result.totalPages,
-        });
+          await this.queue.updateProgress(currentManga.url, {
+            lastPage: result.currentPage,
+            totalPages: result.totalPages,
+          });
 
-        logger.info(`[STATS] Total pages read in this session: ${this.context.pagesReadInCurrentSession}`);
+          logger.info(`[STATS] Total pages read in this session: ${this.context.pagesReadInCurrentSession}`);
+        }
         break;
       }
 
@@ -179,7 +198,6 @@ export class SessionOrchestrator {
   }
 
   private async ensureOnMangaOrReader(page: Page, manga: MangaEntry): Promise<void> {
-    // If we are already in the reader, stay in the reader!
     const inReader = await this.reader.isReaderPage(page);
     if (inReader) {
       return;
@@ -191,7 +209,7 @@ export class SessionOrchestrator {
     if (!isMangaUrl) {
       logger.info(`[NAV] Navigating to manga catalog: ${manga.title}...`);
       await page.goto(manga.url, { waitUntil: 'domcontentloaded' });
-      await sleep(uglyRandom(1500, 3000));
+      await sleep(uglyRandom(2000, 3500));
     }
   }
 

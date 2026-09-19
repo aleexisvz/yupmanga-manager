@@ -27,7 +27,7 @@ export class BrowserManager {
       '--disable-infobars',
       '--enable-webgl',
       '--use-gl=desktop',
-      '--window-size=1920,1080',
+      '--window-size=1280,850',
     ];
 
     if (mode === 'offscreen') {
@@ -49,7 +49,7 @@ export class BrowserManager {
       headless: isHeadless,
       args,
       ignoreDefaultArgs: ['--enable-automation'],
-      viewport: { width: 1920, height: 1080 },
+      viewport: { width: 1280, height: 850 },
       userAgent:
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
     };
@@ -74,6 +74,7 @@ export class BrowserManager {
       }
     }
 
+    // 1. Remove automation markers
     if (config.antiDetection.removeWebdriverFlag) {
       await this.context.addInitScript(() => {
         Object.defineProperty(navigator, 'webdriver', {
@@ -82,24 +83,32 @@ export class BrowserManager {
       });
     }
 
+    // 2. Mock Page Visibility so YupManga's reading timer ALWAYS registers progress in background!
+    await this.context.addInitScript(() => {
+      try {
+        Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+        Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
+        window.addEventListener('visibilitychange', (e) => e.stopImmediatePropagation(), true);
+        window.addEventListener('webkitvisibilitychange', (e) => e.stopImmediatePropagation(), true);
+      } catch {}
+    });
+
     const pages = this.context.pages();
     this.activePage = pages.length > 0 ? pages[0] : await this.context.newPage();
 
     return this.activePage;
   }
 
-  /**
-   * Interactive setup mode for manual login and Cloudflare challenge resolution
-   */
-  async setup(): Promise<void> {
+  async setup(mangaUrl?: string): Promise<void> {
     await this.ensureDataDir();
 
     logger.info('=====================================================');
-    logger.info('[SETUP] Starting manual login setup (visible Chrome)...');
+    logger.info('[SETUP] Starting manual login setup (visible Chrome window)...');
     logger.info('[SETUP] Instructions:');
     logger.info('  1. If Cloudflare asks to verify you are human, click the checkbox.');
     logger.info('  2. Log in with your account ("CrambleSeles").');
-    logger.info('  3. Once logged in and on the site, simply close this browser window.');
+    logger.info('  3. Once logged in and on the site, close this browser window.');
     logger.info('=====================================================');
 
     const args = [
@@ -127,48 +136,47 @@ export class BrowserManager {
     }
 
     const page = context.pages().length > 0 ? context.pages()[0] : await context.newPage();
-    await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
+    
+    // Go to manga page or base URL
+    const targetUrl = mangaUrl || BASE_URL;
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
 
     await new Promise<void>((resolve) => {
       context.on('close', () => {
-        logger.info('[SETUP] Browser window closed. Session saved to ~/.yupmanga/browser-data/');
+        logger.info('[SETUP] Browser window closed. Session and tokens saved to ~/.yupmanga/browser-data/');
         resolve();
       });
     });
   }
 
-  /**
-   * Checks whether the current session is logged in and extracts user details
-   */
   async checkAuth(page: Page): Promise<AuthStatus> {
     try {
       logger.info('[AUTH] Checking account authentication status on YupManga...');
       await page.goto('https://yupmanga.com/perfil', { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(2000);
 
-      const url = page.url();
+      const title = await page.title();
       const content = await page.content();
+      const url = page.url();
 
-      // Check if redirected to login or if login text is present
+      if (title.includes('Attention Required') || title.includes('Cloudflare') || content.includes('cf-challenge')) {
+        logger.warn('[AUTH] Cloudflare challenge active on /perfil');
+        return { isLoggedIn: false };
+      }
+
       const isLoginPage = url.includes('login') || url.includes('ingresar') || content.includes('Iniciar Sesión');
-
       if (isLoginPage) {
         return { isLoggedIn: false };
       }
 
-      // Extract username and stats from profile page
       const profileData = await page.evaluate(() => {
-        // Look for username heading or avatar label
         const bodyText = document.body.innerText;
-        
-        // Find username in profile (e.g. "CrambleSeles")
         let username = '';
         const nameEl = document.querySelector('h1, h2, h3, [class*="username"], [class*="profile-name"]');
         if (nameEl && nameEl.textContent) {
           username = nameEl.textContent.trim().split('\n')[0].trim();
         }
 
-        // Search for stats in text
         let streak = '';
         const streakMatch = bodyText.match(/(\d+)\s*d[ií]as\s*Racha\s*actual/i) || bodyText.match(/Racha.*?(\d+)\s*d[ií]as/i);
         if (streakMatch) streak = `${streakMatch[1]} dias`;
@@ -202,17 +210,28 @@ export class BrowserManager {
     }
   }
 
+  /**
+   * Comprehensive Cloudflare challenge detection
+   */
   async isCloudflareBlocked(page: Page): Promise<boolean> {
     try {
       const title = await page.title();
       const content = await page.content();
 
-      const isChallengeTitle = title.includes('Just a moment') || title.includes('Atención requerida');
+      // Check title markers
+      const isChallengeTitle =
+        title.includes('Just a moment') ||
+        title.includes('Attention Required') ||
+        title.includes('Cloudflare') ||
+        title.includes('Atención requerida');
+
+      // Check content markers
       const hasCloudflareMarkers =
         content.includes('cf-challenge') ||
         content.includes('cf-turnstile') ||
         content.includes('challenge-platform') ||
-        content.includes('Verifica que eres humano');
+        content.includes('Verifica que eres humano') ||
+        content.includes('Ray ID:');
 
       return isChallengeTitle || hasCloudflareMarkers;
     } catch {
