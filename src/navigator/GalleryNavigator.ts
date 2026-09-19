@@ -5,14 +5,10 @@ import { logger } from '../logger.js';
 import { sleep, uglyRandom } from '../utils/delay.js';
 
 export class GalleryNavigator {
-  /**
-   * Determina si la página actual es una página de galería de manga/capítulos
-   */
   async isGalleryPage(page: Page): Promise<boolean> {
     try {
       const url = page.url();
       if (url.includes('series.php') || url.includes('/series/') || url.includes('/manga/')) {
-        // Verificar que no sea el reader activo
         const pageIndicator = await page.locator(SELECTORS.READER_PAGE_INFO).count();
         if (pageIndicator === 0) return true;
       }
@@ -26,9 +22,6 @@ export class GalleryNavigator {
     }
   }
 
-  /**
-   * Obtiene el estado de un volumen analizando sus clases Tailwind, texto y estilo computado
-   */
   async getVolumeStatus(volumeLocator: Locator): Promise<VolumeStatus> {
     try {
       return await volumeLocator.evaluate((el: HTMLElement) => {
@@ -37,15 +30,12 @@ export class GalleryNavigator {
 
         const cls = badge.className || '';
 
-        // 1. Detección por clases Tailwind
         if (cls.includes('green')) return 'completed';
         if (cls.includes('orange') || cls.includes('amber')) return 'in-progress';
 
-        // 2. Detección por ícono unicode de check
         const text = (badge.textContent || '').trim();
         if (text.includes('✓')) return 'completed';
 
-        // 3. Fallback: estilo computado
         const style = window.getComputedStyle(badge);
         const props = ['borderTopColor', 'borderLeftColor', 'backgroundColor', 'color'];
 
@@ -62,10 +52,7 @@ export class GalleryNavigator {
 
           if (r === 0 && g === 0 && b === 0) continue;
 
-          // Verde: g dominante
           if (g > r * 1.3 && g > b * 1.3 && g >= 80) return 'completed';
-
-          // Naranja: r dominante
           if (r >= 150 && r > g * 1.35 && b <= 50) return 'in-progress';
         }
 
@@ -76,9 +63,6 @@ export class GalleryNavigator {
     }
   }
 
-  /**
-   * Lista todos los volúmenes visibles en la galería con sus estados y enlaces
-   */
   async listAllVolumes(page: Page): Promise<VolumeInfo[]> {
     const locators = page.locator(SELECTORS.CHAPTER_LINK);
     const count = await locators.count();
@@ -92,7 +76,7 @@ export class GalleryNavigator {
 
       result.push({
         href: href.startsWith('http') ? href : new URL(href, page.url()).toString(),
-        title: title || `Capítulo ${i + 1}`,
+        title: title || `Chapter ${i + 1}`,
         status,
       });
     }
@@ -100,11 +84,6 @@ export class GalleryNavigator {
     return result;
   }
 
-  /**
-   * Encuentra el siguiente volumen que debe leerse:
-   * 1. Prioridad: 'in-progress'
-   * 2. Prioridad: 'not-started' o 'unknown'
-   */
   async findNextVolume(page: Page): Promise<{ locator: Locator; info: VolumeInfo } | null> {
     const locators = page.locator(SELECTORS.CHAPTER_LINK);
     const count = await locators.count();
@@ -122,13 +101,13 @@ export class GalleryNavigator {
 
       const info: VolumeInfo = {
         href: href.startsWith('http') ? href : new URL(href, page.url()).toString(),
-        title: title || `Capítulo ${i + 1}`,
+        title: title || `Chapter ${i + 1}`,
         status,
       };
 
       if (status === 'in-progress' && !inProgressCandidate) {
         inProgressCandidate = { locator: loc, info };
-        break; // Tomamos el primer en progreso inmediatamente
+        break;
       }
 
       if ((status === 'not-started' || status === 'unknown') && !notStartedCandidate) {
@@ -139,19 +118,15 @@ export class GalleryNavigator {
     return inProgressCandidate || notStartedCandidate;
   }
 
-  /**
-   * Abre el siguiente volumen pendiente haciendo click humanizado
-   */
   async openNextVolume(page: Page): Promise<VolumeInfo | null> {
     const candidate = await this.findNextVolume(page);
     if (!candidate) {
-      logger.info('📚 No se encontraron volúmenes pendientes en esta página de galería.');
+      logger.info('[GALLERY] No pending volumes found on this catalog page.');
       return null;
     }
 
-    logger.info(`👉 Abriendo volumen: "${candidate.info.title}" [Estado: ${candidate.info.status}]...`);
+    logger.info(`[GALLERY] Opening volume: "${candidate.info.title}" [Status: ${candidate.info.status}]...`);
 
-    // Micro-pausa natural antes del click
     await sleep(uglyRandom(600, 1400));
     await candidate.locator.scrollIntoViewIfNeeded();
     await candidate.locator.click();
@@ -159,9 +134,6 @@ export class GalleryNavigator {
     return candidate.info;
   }
 
-  /**
-   * Comprueba si hay una página siguiente en la paginación de la galería
-   */
   async hasNextGalleryPage(page: Page): Promise<boolean> {
     const nextButtons = page.locator('a, button').filter({
       hasText: /^(siguiente|next|›|»)$/i,
@@ -178,9 +150,6 @@ export class GalleryNavigator {
     return false;
   }
 
-  /**
-   * Navega a la siguiente página de la galería
-   */
   async goToNextGalleryPage(page: Page): Promise<boolean> {
     const nextButtons = page.locator('a, button').filter({
       hasText: /^(siguiente|next|›|»)$/i,
@@ -190,7 +159,7 @@ export class GalleryNavigator {
     for (let i = 0; i < count; i++) {
       const btn = nextButtons.nth(i);
       if ((await btn.isVisible()) && (await btn.isEnabled())) {
-        logger.info('📄 Navegando a la siguiente página del catálogo...');
+        logger.info('[GALLERY] Navigating to next catalog page...');
         await sleep(uglyRandom(700, 1800));
         await btn.click();
         await page.waitForLoadState('domcontentloaded');

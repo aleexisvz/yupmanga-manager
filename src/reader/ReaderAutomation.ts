@@ -2,7 +2,7 @@ import type { Page } from 'playwright';
 import { SELECTORS } from '../config/defaults.js';
 import type { AppConfig, PageInfo } from '../config/types.js';
 import { logger } from '../logger.js';
-import { sleep, randomInterval, getTimeMultiplier, uglyRandom } from '../utils/delay.js';
+import { sleep, uglyRandom, getTimeMultiplier } from '../utils/delay.js';
 
 export interface ReadingSessionResult {
   pagesRead: number;
@@ -13,71 +13,75 @@ export interface ReadingSessionResult {
 
 export class ReaderAutomation {
   /**
-   * Detecta y maneja el anuncio intermedio con cuenta regresiva ("Espera X segundos...")
+   * Detects and waits for the pre-reader countdown ad ("Wait X seconds...")
    */
   async handlePreReaderAd(page: Page): Promise<void> {
     try {
-      // Comprobar si está presente el modal de anuncio
       const adModal = page.locator(SELECTORS.AD_MODAL_CONTAINER);
       const isVisible = await adModal.isVisible({ timeout: 2500 }).catch(() => false);
 
       if (!isVisible) return;
 
-      logger.info('⏳ Pantalla intermedia de espera detectada ("Un momento y podrás seguir leyendo")...');
+      logger.info('[READER] Interstitial ad screen detected. Waiting for countdown...');
 
-      // Esperar a que la cuenta regresiva termine (hasta 15s)
       const continueBtn = page.locator(SELECTORS.AD_CONTINUE_BUTTON);
 
-      // Esperar a que el botón de Continuar esté disponible y clickeable
       await continueBtn.waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {
-        logger.debug('Botón directo de continuar no apareció por selector estándar, esperando desaparición del contador...');
+        logger.debug('[READER] Waiting for ad container to dismiss...');
       });
 
-      // Pausa humana breve tras terminar la cuenta atrás
-      await sleep(uglyRandom(800, 1900));
+      await sleep(uglyRandom(800, 1800));
 
       if (await continueBtn.isVisible().catch(() => false)) {
-        logger.info('👉 Clickeando botón para continuar al lector...');
+        logger.info('[READER] Clicking continue button to enter reader...');
         await continueBtn.click();
       } else {
-        // En caso de que el modal se cierre solo o cambie
         await adModal.waitFor({ state: 'hidden', timeout: 8_000 }).catch(() => {});
       }
 
-      await sleep(uglyRandom(1000, 2000));
+      await sleep(uglyRandom(1200, 2200));
     } catch (error) {
-      logger.debug({ error }, 'Aviso durante el manejo de publicidad previa');
+      logger.debug({ error }, '[READER] Error handling pre-reader ad');
     }
   }
 
   /**
-   * Extrae la información de la página actual ("Página X de Y")
+   * Robustly extracts current page and total pages ("Pagina X de Y")
+   * Handles nested colored/styled spans.
    */
   async getPageInfo(page: Page): Promise<PageInfo | null> {
     try {
-      const pageInfoLocator = page.locator(SELECTORS.READER_PAGE_INFO).first();
-      const isVisible = await pageInfoLocator.isVisible({ timeout: 2000 }).catch(() => false);
-
-      if (!isVisible) return null;
-
-      const text = await pageInfoLocator.innerText();
-      const match = text.match(/Página\s+(\d+)\s+de\s+(\d+)/i);
-
-      if (match) {
-        return {
-          currentPage: parseInt(match[1], 10),
-          totalPages: parseInt(match[2], 10),
-        };
-      }
-
-      return null;
+      return await page.evaluate(() => {
+        // Search across potential header/toolbar elements
+        const elements = document.querySelectorAll('header, div, p, span');
+        for (const el of elements) {
+          if (el.children.length > 6) continue; // Skip large page wrappers
+          const text = el.textContent || '';
+          const match = text.match(/P[aá]gina\s+(\d+)\s+de\s+(\d+)/i);
+          if (match) {
+            return {
+              currentPage: parseInt(match[1], 10),
+              totalPages: parseInt(match[2], 10),
+            };
+          }
+        }
+        return null;
+      });
     } catch {
       return null;
     }
   }
 
   /**
-   * Verifica si se ha alcanzado la última página del tomo/capítulo
+   * Checks whether the current page is actively displaying the reader
+   */
+  async isReaderPage(page: Page): Promise<boolean> {
+    const info = await this.getPageInfo(page);
+    return info !== null;
+  }
+
+  /**
+   * Checks if the reader reached the final page of the volume
    */
   async isLastPage(page: Page): Promise<boolean> {
     const info = await this.getPageInfo(page);
@@ -86,7 +90,7 @@ export class ReaderAutomation {
   }
 
   /**
-   * Avanza a la siguiente página mediante teclado real o click
+   * Advances to next page using real CDP keyboard press or click
    */
   async turnPage(page: Page, config: AppConfig): Promise<void> {
     if (config.mode === 'click' && config.clickSelector) {
@@ -97,19 +101,18 @@ export class ReaderAutomation {
       }
     }
 
-    // Por defecto: flecha derecha real a nivel CDP
     await page.keyboard.press('ArrowRight');
   }
 
   /**
-   * Cierra el lector y regresa a la galería
+   * Closes the reader to return to the manga gallery
    */
   async closeReader(page: Page): Promise<boolean> {
     try {
       const closeBtn = page.locator(SELECTORS.READER_CLOSE_BUTTON).first();
-      if (await closeBtn.isVisible({ timeout: 2000 })) {
-        logger.info('📕 Fin del volumen alcanzado. Clickeando "Cerrar" para volver a la galería...');
-        await sleep(uglyRandom(700, 1500));
+      if (await closeBtn.isVisible({ timeout: 2500 })) {
+        logger.info('[READER] Volume finished. Clicking Close to return to gallery...');
+        await sleep(uglyRandom(800, 1600));
         await closeBtn.click();
         await page.waitForLoadState('domcontentloaded');
         return true;
@@ -121,7 +124,7 @@ export class ReaderAutomation {
   }
 
   /**
-   * Ejecuta un bloque de lectura de N páginas continuas con ritmo orgánico
+   * Reads a block of pages with humanized 9s-18s rhythm and 30%-60% variation
    */
   async readPages(
     page: Page,
@@ -129,19 +132,17 @@ export class ReaderAutomation {
     config: AppConfig,
     signal?: AbortSignal
   ): Promise<ReadingSessionResult> {
-    // 1. Manejar anuncio intermedio si está presente
     await this.handlePreReaderAd(page);
 
     let pagesRead = 0;
     let volumeCompleted = false;
     let lastInfo: PageInfo = { currentPage: 1, totalPages: 1 };
 
-    // En cada sesión de lectura, el porcentaje de variación se calcula aleatoriamente entre 30% y 60% con decimales
-    const sessionVariation = uglyRandom(30, 60);
+    // Dynamic variation calculated for this reading session between 30% and 60%
+    const sessionVariation = uglyRandom(30.0, 60.0);
+
     logger.info(
-      `📖 Iniciando bloque de lectura (meta: ${targetPagesCount} págs, ritmo base: ${
-        config.intervalMs / 1000
-      }s con variación de ±${sessionVariation}%)...`
+      `[READER] Starting reading block: target ${targetPagesCount} pages (session variation: +${sessionVariation}%)...`
     );
 
     while (pagesRead < targetPagesCount) {
@@ -150,24 +151,29 @@ export class ReaderAutomation {
       const info = await this.getPageInfo(page);
       if (info) {
         lastInfo = info;
-        logger.info(`📑 [Lector] Página ${info.currentPage} de ${info.totalPages}`);
+        logger.info(`[READER] Page ${info.currentPage} of ${info.totalPages} (read: ${pagesRead}/${targetPagesCount})`);
 
         if (info.currentPage >= info.totalPages) {
-          logger.info('🎉 ¡Última página del volumen alcanzada!');
+          logger.info('[READER] Final page of volume reached!');
           volumeCompleted = true;
           await this.closeReader(page);
           break;
         }
       }
 
-      // Intervalo entre páginas usando la variación dinámica de la sesión y el multiplicador de hora
+      // Base interval between 9.0s and 18.0s per page
+      const baseSeconds = uglyRandom(9.0, 18.0);
+      // Final delay applying variation percentage: base * (1 + variation/100)
+      const delaySeconds = baseSeconds * (1 + sessionVariation / 100);
       const timeMultiplier = getTimeMultiplier();
-      const baseDelay = randomInterval(config.intervalMs, sessionVariation);
-      const delay = Math.round(baseDelay * timeMultiplier);
+      const finalDelayMs = Math.round(delaySeconds * timeMultiplier * 1000);
 
-      await sleep(delay, signal);
+      logger.debug(
+        `[READER] Next page in ${(finalDelayMs / 1000).toFixed(2)}s (base: ${baseSeconds}s, var: +${sessionVariation}%)`
+      );
 
-      // Pasar página
+      await sleep(finalDelayMs, signal);
+
       await this.turnPage(page, config);
       pagesRead++;
     }

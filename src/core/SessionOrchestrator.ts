@@ -33,9 +33,6 @@ export class SessionOrchestrator {
     private config: AppConfig
   ) {}
 
-  /**
-   * Inicia la sesión de lectura autónoma
-   */
   async start(): Promise<void> {
     this.isRunning = true;
     this.abortController = new AbortController();
@@ -43,49 +40,56 @@ export class SessionOrchestrator {
 
     const page = await this.browser.launch(this.config);
 
-    logger.info('🚀 Sesión autónoma de YupManga Manager iniciada.');
+    logger.info('[SESSION] Autonomous reading session started.');
+
+    // Verify account authentication status
+    const auth = await this.browser.checkAuth(page);
+    if (auth.isLoggedIn) {
+      logger.info(
+        `[AUTH] Connected as user: [${auth.username}] (Streak: ${auth.streak || 'N/A'}, Read: ${auth.caps || 'N/A'} caps)`
+      );
+    } else {
+      logger.warn('*******************************************************************');
+      logger.warn('[WARNING] [AUTH] YOU ARE CURRENTLY NOT LOGGED IN!');
+      logger.warn('[WARNING] [AUTH] Running in ANONYMOUS GUEST mode.');
+      logger.warn('[WARNING] [AUTH] Reading progress will NOT be registered to your account!');
+      logger.warn('[WARNING] [AUTH] Please run "Setup" to log in with your CrambleSeles account.');
+      logger.warn('*******************************************************************');
+    }
 
     try {
       while (this.isRunning) {
-        // 1. Detección de Cloudflare
         if (await this.browser.isCloudflareBlocked(page)) {
-          logger.warn('🛡️ Cloudflare challenge detectado. Pausando para no emitir señales de bot...');
-          logger.warn('👉 Por favor ejecuta "npm run dev -- setup" para renovar la verificación manual.');
+          logger.warn('[CLOUDFLARE] Challenge detected. Pausing session to protect IP address.');
+          logger.warn('[CLOUDFLARE] Please run "npm run dev -- setup" to refresh your verification token.');
           break;
         }
 
-        // 2. Obtener el manga actual de la cola
         const currentManga = await this.queue.getNext();
         if (!currentManga) {
-          logger.warn('📋 La cola de mangas está vacía o todos los mangas están completados.');
-          logger.info('💡 Agrega mangas a la cola usando el menú interactivo.');
+          logger.warn('[QUEUE] The manga queue is empty or all entries are marked as completed.');
+          logger.info('[QUEUE] Add a series via the interactive CLI menu.');
           break;
         }
 
-        // 3. Consultar al ActionScheduler qué acción tomar
         const action = this.scheduler.getNextAction(this.context);
-        logger.info(`🎲 Acción programada: [${action.type}]`);
+        logger.info(`[SCHEDULER] Next action scheduled: [${action.type}]`);
 
-        // 4. Ejecutar la acción correspondiente
-        await this.executeAction(page, action.type, action.pagesToRead || 15, currentManga);
+        await this.executeAction(page, action.type, action.pagesToRead || 40, currentManga);
 
-        // 5. Actualizar contexto
         this.context.lastAction = action.type;
       }
     } catch (error: any) {
       if (error?.message?.includes('aborted')) {
-        logger.info('Sesión interrumpida limpiamente.');
+        logger.info('[SESSION] Session terminated gracefully.');
       } else {
-        logger.error({ error }, 'Error inesperado durante la orquestación');
+        logger.error({ error }, '[SESSION] Unexpected error during orchestration');
       }
     } finally {
       await this.stop();
     }
   }
 
-  /**
-   * Ejecuta una acción puntual determinada por el scheduler
-   */
   private async executeAction(
     page: Page,
     actionType: string,
@@ -98,18 +102,17 @@ export class SessionOrchestrator {
       case 'read_pages': {
         await this.ensureOnMangaOrReader(page, currentManga);
 
-        // Si estamos en la galería, abrir siguiente volumen
+        // Check if on gallery page, if so open next volume
         const isGallery = await this.gallery.isGalleryPage(page);
         if (isGallery) {
           const opened = await this.gallery.openNextVolume(page);
           if (!opened) {
-            // Verificar si hay más páginas en el catálogo
             const hasNextPage = await this.gallery.hasNextGalleryPage(page);
             if (hasNextPage) {
               await this.gallery.goToNextGalleryPage(page);
               break;
             } else {
-              logger.info(`🏆 ¡Manga "${currentManga.title}" completado al 100%!`);
+              logger.info(`[GALLERY] Manga "${currentManga.title}" 100% completed!`);
               await this.queue.updateProgress(currentManga.url, {}, 'completed');
               break;
             }
@@ -117,12 +120,11 @@ export class SessionOrchestrator {
           await sleep(uglyRandom(1500, 3000));
         }
 
-        // Ejecutar bloque de lectura de páginas
+        // Execute reading block
         const result = await this.reader.readPages(page, pagesToRead, this.config, signal);
 
         this.context.pagesReadInCurrentSession += result.pagesRead;
 
-        // Guardar progreso en disco
         await this.tracker.recordSession(
           currentManga.url,
           currentManga.title,
@@ -137,7 +139,7 @@ export class SessionOrchestrator {
           totalPages: result.totalPages,
         });
 
-        logger.info(`📊 Páginas leídas en esta sesión: ${this.context.pagesReadInCurrentSession}`);
+        logger.info(`[STATS] Total pages read in this session: ${this.context.pagesReadInCurrentSession}`);
         break;
       }
 
@@ -176,28 +178,27 @@ export class SessionOrchestrator {
     }
   }
 
-  /**
-   * Asegura que el navegador esté en la URL del manga actual o dentro de su reader
-   */
   private async ensureOnMangaOrReader(page: Page, manga: MangaEntry): Promise<void> {
+    // If we are already in the reader, stay in the reader!
+    const inReader = await this.reader.isReaderPage(page);
+    if (inReader) {
+      return;
+    }
+
     const currentUrl = page.url();
     const isMangaUrl = currentUrl.includes(manga.url) || manga.url.includes(currentUrl);
-    const inReader = (await page.locator('text=/Página\\s+\\d+\\s+de\\s+\\d+/i').count()) > 0;
 
-    if (!isMangaUrl && !inReader) {
-      logger.info(`🧭 Navegando a la galería del manga: ${manga.title}...`);
+    if (!isMangaUrl) {
+      logger.info(`[NAV] Navigating to manga catalog: ${manga.title}...`);
       await page.goto(manga.url, { waitUntil: 'domcontentloaded' });
       await sleep(uglyRandom(1500, 3000));
     }
   }
 
-  /**
-   * Detiene la sesión ordenadamente
-   */
   async stop(): Promise<void> {
     this.isRunning = false;
     this.abortController?.abort();
     await this.browser.close();
-    logger.info('⏹️ Sesión de lectura detenida y navegador cerrado.');
+    logger.info('[SESSION] Reading session stopped and browser closed.');
   }
 }

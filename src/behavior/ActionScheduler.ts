@@ -19,51 +19,48 @@ export class ActionScheduler {
   constructor(private config: AppConfig) {}
 
   /**
-   * Decide cuál debe ser la siguiente acción basada en probabilidades ponderadas y contexto
+   * Decides next action based on weighted probability and fatigue context
    */
   getNextAction(context: SessionContext): ScheduledAction {
     const weights: Record<ActionType, number> = { ...this.config.behavior.weights };
     const now = Date.now();
 
-    // 1. Ajustes dinámicos según fatiga de lectura (ahora adaptado a sesiones de 30-100 páginas)
+    // 1. Fatigue adjustments for long reading sessions (70+ pages)
     if (context.pagesReadInCurrentSession >= 70) {
       weights.short_break += 20;
       weights.scroll_around += 15;
       weights.read_pages = Math.max(25, weights.read_pages - 25);
     }
 
-    // 2. Si acaba de leer muchas páginas continuas y lleva más de 60 min, fomentar descanso
+    // 2. Reading session duration fatigue (> 60 minutes)
     const readingMinutes = (now - context.sessionStartTime) / 60_000;
     if (readingMinutes > 60) {
       weights.long_break += 10;
       weights.short_break += 15;
     }
 
-    // 3. Evitar visitar el perfil con demasiada frecuencia (< 15 minutos)
+    // 3. Avoid visiting profile too frequently (< 15 minutes)
     if (now - context.lastProfileVisitTimestamp < 15 * 60_000) {
       weights.visit_profile = 0;
     }
 
-    // 4. Evitar visitar categorías con demasiada frecuencia (< 20 minutos)
+    // 4. Avoid visiting categories too frequently (< 20 minutes)
     if (now - context.lastCategoryVisitTimestamp < 20 * 60_000) {
       weights.visit_categories = 0;
     }
 
-    // 5. Evitar descansos repetidos si el último fue hace menos de 8 minutos
+    // 5. Avoid back-to-back breaks (< 8 minutes)
     if (now - context.lastBreakTimestamp < 8 * 60_000) {
       weights.short_break = Math.max(2, weights.short_break - 15);
       weights.long_break = 0;
     }
 
-    // 6. Selección aleatoria ponderada
     const actionType = this.weightedRandomChoice(weights);
 
-    // 7. Si la acción es leer páginas, determinar cantidad orgánica de páginas
+    // Enforce 30 to 100 pages per reading session
     let pagesToRead: number | undefined;
     if (actionType === 'read_pages') {
-      const min = this.config.behavior.pagesPerReadingSession.min;
-      const max = this.config.behavior.pagesPerReadingSession.max;
-      pagesToRead = Math.floor(uglyRandom(min, max));
+      pagesToRead = Math.floor(uglyRandom(30, 100));
     }
 
     return {
@@ -72,9 +69,6 @@ export class ActionScheduler {
     };
   }
 
-  /**
-   * Algoritmo de ruleta para selección ponderada
-   */
   private weightedRandomChoice(weights: Record<ActionType, number>): ActionType {
     const entries = Object.entries(weights) as [ActionType, number][];
     const totalWeight = entries.reduce((sum, [, w]) => sum + Math.max(0, w), 0);

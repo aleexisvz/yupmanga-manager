@@ -18,12 +18,12 @@ const program = new Command();
 
 program
   .name('yupmanga')
-  .description('YupManga Manager — Simulador autónomo de lectura y navegación para yupmanga.com')
+  .description('YupManga Manager — Autonomous reading and browsing simulator for yupmanga.com')
   .version('1.0.0');
 
 program
   .command('setup')
-  .description('Abre Google Chrome en modo visible para resolver Cloudflare e iniciar sesión manualmente')
+  .description('Open Google Chrome in visible mode to resolve Cloudflare and log into your account')
   .action(async () => {
     const browser = new BrowserManager();
     await browser.setup();
@@ -31,21 +31,54 @@ program
   });
 
 program
+  .command('check')
+  .description('Check whether an account is currently logged in on YupManga')
+  .action(async () => {
+    await checkAccountStatus();
+    process.exit(0);
+  });
+
+program
   .command('start')
-  .description('Inicia la sesión de lectura autónoma directamente en segundo plano')
+  .description('Start the autonomous reading session in background')
   .action(async () => {
     await startSession();
   });
 
-async function startSession() {
+async function checkAccountStatus(): Promise<void> {
+  const config = await ConfigLoader.load();
+  const browser = new BrowserManager();
+  console.log(chalk.cyan('\n[AUTH] Verifying authentication on yupmanga.com...'));
+
+  const page = await browser.launch({ ...config, runMode: 'headless' });
+  const auth = await browser.checkAuth(page);
+  await browser.close();
+
+  if (auth.isLoggedIn) {
+    console.log(chalk.green('\n================================================='));
+    console.log(chalk.green(`  CONNECTED ACCOUNT: ${chalk.bold(auth.username)}`));
+    if (auth.streak) console.log(chalk.green(`  Reading Streak: ${auth.streak}`));
+    if (auth.caps) console.log(chalk.green(`  Chapters Read: ${auth.caps}`));
+    if (auth.series) console.log(chalk.green(`  Series Read: ${auth.series}`));
+    console.log(chalk.green('=================================================\n'));
+  } else {
+    console.log(chalk.red('\n================================================='));
+    console.log(chalk.red('  STATUS: NOT LOGGED IN (ANONYMOUS / GUEST MODE)'));
+    console.log(chalk.yellow('  Warning: Progress will NOT be saved to any account!'));
+    console.log(chalk.cyan('  Action: Run "Setup inicial" to log into your account.'));
+    console.log(chalk.red('=================================================\n'));
+  }
+}
+
+async function startSession(): Promise<void> {
   const config = await ConfigLoader.load();
   const queue = new MangaQueue();
   const tracker = new ProgressTracker();
 
   const entries = await queue.list();
   if (entries.length === 0) {
-    console.log(chalk.yellow('\n⚠️ No tienes mangas en la cola de lectura.'));
-    console.log(chalk.cyan('👉 Agrega uno ejecutando la CLI interactiva (npm run dev) o usando la opción 3.\n'));
+    console.log(chalk.yellow('\n[QUEUE] No manga in reading queue.'));
+    console.log(chalk.cyan('Add a series using the interactive menu (npm run dev).\n'));
     return;
   }
 
@@ -74,7 +107,7 @@ async function startSession() {
   await orchestrator.start();
 }
 
-async function showInteractiveMenu() {
+async function showInteractiveMenu(): Promise<void> {
   const queue = new MangaQueue();
   const tracker = new ProgressTracker();
   let config = await ConfigLoader.load();
@@ -83,23 +116,24 @@ async function showInteractiveMenu() {
   console.log(
     chalk.magentaBright(`
   ================================================
-     📖  YUPMANGA MANAGER — Lector Autónomo
+     YUPMANGA MANAGER - Autonomous Reader
   ================================================
   `)
   );
 
   while (true) {
     const choice = await select({
-      message: '¿Qué deseas hacer?',
+      message: 'Choose an option:',
       choices: [
-        { name: '🚀 Iniciar sesión de lectura', value: 'start' },
-        { name: '📋 Ver cola de mangas', value: 'list_queue' },
-        { name: '➕ Agregar manga a la cola', value: 'add_manga' },
-        { name: '🗑️  Eliminar manga de la cola', value: 'remove_manga' },
-        { name: '📊 Ver estadísticas y progreso', value: 'stats' },
-        { name: '⚙️  Configurar modo y tiempos', value: 'config' },
-        { name: '🔑 Setup inicial (Login manual y Cloudflare)', value: 'setup' },
-        { name: '🚪 Salir', value: 'exit' },
+        { name: '1. Start autonomous reading session', value: 'start' },
+        { name: '2. Check connected account status', value: 'check_auth' },
+        { name: '3. View manga reading queue', value: 'list_queue' },
+        { name: '4. Add manga to queue', value: 'add_manga' },
+        { name: '5. Remove manga from queue', value: 'remove_manga' },
+        { name: '6. View statistics & progress', value: 'stats' },
+        { name: '7. Settings (runMode, intervals)', value: 'config' },
+        { name: '8. Initial Setup (Manual login / Cloudflare)', value: 'setup' },
+        { name: '9. Exit', value: 'exit' },
       ],
     });
 
@@ -108,11 +142,15 @@ async function showInteractiveMenu() {
         await startSession();
         return;
 
+      case 'check_auth':
+        await checkAccountStatus();
+        break;
+
       case 'list_queue': {
         const entries = await queue.list();
-        console.log(chalk.cyan('\n📋 Mangas en la cola de lectura:'));
+        console.log(chalk.cyan('\nManga reading queue:'));
         if (entries.length === 0) {
-          console.log(chalk.gray('  (La cola está vacía)\n'));
+          console.log(chalk.gray('  (Queue is currently empty)\n'));
         } else {
           entries.forEach((m, idx) => {
             console.log(
@@ -126,45 +164,45 @@ async function showInteractiveMenu() {
 
       case 'add_manga': {
         const url = await input({
-          message: 'Introduce la URL de la serie/manga en yupmanga.com:',
-          validate: (val) => (val.includes('yupmanga.com') ? true : 'Debe ser una URL de yupmanga.com'),
+          message: 'Enter manga URL on yupmanga.com:',
+          validate: (val) => (val.includes('yupmanga.com') ? true : 'Must be a yupmanga.com URL'),
         });
         const title = await input({
-          message: 'Nombre o título del manga:',
+          message: 'Manga title/name:',
           default: url.split('/').filter(Boolean).pop() || 'Manga',
         });
         await queue.add(url, title);
-        console.log(chalk.green(`\n✅ "${title}" agregado a la cola con éxito.\n`));
+        console.log(chalk.green(`\nSuccessfully added "${title}" to queue.\n`));
         break;
       }
 
       case 'remove_manga': {
         const entries = await queue.list();
         if (entries.length === 0) {
-          console.log(chalk.yellow('\nNo hay mangas para eliminar.\n'));
+          console.log(chalk.yellow('\nQueue is empty.\n'));
           break;
         }
         const toRemove = await select({
-          message: 'Selecciona el manga a eliminar:',
+          message: 'Select manga to remove:',
           choices: entries.map((m) => ({ name: m.title, value: m.url })),
         });
         await queue.remove(toRemove);
-        console.log(chalk.green('\n✅ Manga eliminado de la cola.\n'));
+        console.log(chalk.green('\nManga removed from queue.\n'));
         break;
       }
 
       case 'stats': {
         const records = await tracker.getAll();
-        console.log(chalk.cyan('\n📊 Historial y estadísticas acumuladas:'));
+        console.log(chalk.cyan('\nReading statistics & history:'));
         if (records.length === 0) {
-          console.log(chalk.gray('  (Aún no hay estadísticas registradas)\n'));
+          console.log(chalk.gray('  (No stats recorded yet)\n'));
         } else {
           records.forEach((r) => {
-            console.log(`  📖 ${chalk.bold(r.title)}:`);
-            console.log(`     - Páginas totales leídas: ${r.totalPagesReadAccumulated}`);
-            console.log(`     - Volúmenes completados: ${r.totalVolumesCompleted}`);
-            console.log(`     - Sesiones realizadas: ${r.sessionsCount}`);
-            console.log(`     - Última lectura: ${new Date(r.lastReadTimestamp).toLocaleString()}\n`);
+            console.log(`  ${chalk.bold(r.title)}:`);
+            console.log(`     - Total pages read: ${r.totalPagesReadAccumulated}`);
+            console.log(`     - Volumes completed: ${r.totalVolumesCompleted}`);
+            console.log(`     - Sessions count: ${r.sessionsCount}`);
+            console.log(`     - Last reading: ${new Date(r.lastReadTimestamp).toLocaleString()}\n`);
           });
         }
         break;
@@ -172,25 +210,18 @@ async function showInteractiveMenu() {
 
       case 'config': {
         const newRunMode = await select({
-          message: 'Modo de ejecución del navegador:',
+          message: 'Browser execution mode:',
           choices: [
-            { name: '👻 Headless (Invisible en segundo plano)', value: 'headless' },
-            { name: '🖥️  Off-screen (Headed real con GPU fuera de pantalla)', value: 'offscreen' },
-            { name: '👀 Headed (Ventana visible)', value: 'headed' },
+            { name: 'Headless (invisible in background)', value: 'headless' },
+            { name: 'Off-screen (real headed window off-monitor)', value: 'offscreen' },
+            { name: 'Headed (visible window)', value: 'headed' },
           ],
           default: config.runMode,
         });
 
-        const newInterval = await input({
-          message: 'Tiempo base entre páginas (milisegundos):',
-          default: String(config.intervalMs),
-          validate: (v) => (!isNaN(Number(v)) && Number(v) >= 1000 ? true : 'Debe ser >= 1000ms'),
-        });
-
         config.runMode = newRunMode as any;
-        config.intervalMs = Number(newInterval);
         await ConfigLoader.save(config);
-        console.log(chalk.green('\n✅ Configuración guardada correctamente.\n'));
+        console.log(chalk.green('\nConfiguration saved successfully.\n'));
         break;
       }
 
@@ -201,16 +232,15 @@ async function showInteractiveMenu() {
       }
 
       case 'exit':
-        console.log(chalk.gray('\n¡Hasta pronto! 👋\n'));
+        console.log(chalk.gray('\nGoodbye!\n'));
         process.exit(0);
     }
   }
 }
 
-// Si no se pasaron argumentos por terminal, mostrar el menú interactivo
 if (process.argv.length <= 2) {
   showInteractiveMenu().catch((err) => {
-    logger.error({ err }, 'Error en el menú interactivo');
+    logger.error({ err }, 'Error in interactive menu');
   });
 } else {
   program.parse();
