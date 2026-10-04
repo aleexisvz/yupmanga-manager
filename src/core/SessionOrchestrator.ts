@@ -110,26 +110,45 @@ export class SessionOrchestrator {
           if (!resolved) return;
         }
 
-        // Check if on gallery page, if so open next volume
-        const isGallery = await this.gallery.isGalleryPage(page);
-        if (isGallery) {
-          const opened = await this.gallery.openNextVolume(page);
-          if (!opened) {
-            const hasNextPage = await this.gallery.hasNextGalleryPage(page);
-            if (hasNextPage) {
-              await this.gallery.goToNextGalleryPage(page);
-              break;
-            } else {
-              logger.info(`[GALLERY] Manga "${currentManga.title}" 100% completed!`);
-              await this.queue.updateProgress(currentManga.url, {}, 'completed');
-              break;
+        let activeReaderPage = page;
+
+        // Check if there is already an open reader popup in the browser context
+        const contextPages = page.context().pages();
+        const existingModal = contextPages.find(
+          (p) =>
+            !p.isClosed() &&
+            p !== page &&
+            (p.url().includes('box-modal') ||
+              p.url().includes('chapter') ||
+              p.url().includes('reader') ||
+              p.url().includes('interstitial'))
+        );
+
+        if (existingModal) {
+          activeReaderPage = existingModal;
+        } else {
+          // Check if on gallery page, if so open next volume
+          const isGallery = await this.gallery.isGalleryPage(page);
+          if (isGallery) {
+            const opened = await this.gallery.openNextVolume(page);
+            if (!opened) {
+              const hasNextPage = await this.gallery.hasNextGalleryPage(page);
+              if (hasNextPage) {
+                await this.gallery.goToNextGalleryPage(page);
+                break;
+              } else {
+                logger.info(`[GALLERY] Manga "${currentManga.title}" 100% completed!`);
+                await this.queue.updateProgress(currentManga.url, {}, 'completed');
+                break;
+              }
             }
+            activeReaderPage = opened.readerPage;
+            await sleep(uglyRandom(2000, 4000));
           }
-          await sleep(uglyRandom(2000, 4000));
         }
 
-        // Execute reading block
-        const result = await this.reader.readPages(page, pagesToRead, this.config, signal);
+        // Execute reading block on the active reader page
+        const result = await this.reader.readPages(activeReaderPage, pagesToRead, this.config, signal);
 
         this.context.pagesReadInCurrentSession += result.pagesRead;
 
@@ -194,8 +213,21 @@ export class SessionOrchestrator {
       return;
     }
 
+    // Also check if any open popup window in context is in reader or ad modal
+    const contextPages = page.context().pages();
+    for (const p of contextPages) {
+      if (!p.isClosed() && p !== page) {
+        if (p.url().includes('box-modal') || (await this.reader.isReaderPage(p))) {
+          return;
+        }
+      }
+    }
+
     const currentUrl = page.url();
-    const isMangaUrl = currentUrl.includes(manga.url) || manga.url.includes(currentUrl);
+    const normalize = (u: string) => u.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+    const isMangaUrl =
+      normalize(currentUrl).includes(normalize(manga.url)) ||
+      normalize(manga.url).includes(normalize(currentUrl));
 
     if (!isMangaUrl) {
       logger.info(`[NAV] Navigating to manga catalog: ${manga.title}...`);

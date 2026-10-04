@@ -4,6 +4,11 @@ import type { VolumeInfo, VolumeStatus } from '../config/types.js';
 import { logger } from '../logger.js';
 import { sleep, uglyRandom } from '../utils/delay.js';
 
+export interface OpenedVolumeResult {
+  info: VolumeInfo;
+  readerPage: Page;
+}
+
 export class GalleryNavigator {
   async isGalleryPage(page: Page): Promise<boolean> {
     try {
@@ -118,7 +123,7 @@ export class GalleryNavigator {
     return inProgressCandidate || notStartedCandidate;
   }
 
-  async openNextVolume(page: Page): Promise<VolumeInfo | null> {
+  async openNextVolume(page: Page): Promise<OpenedVolumeResult | null> {
     const candidate = await this.findNextVolume(page);
     if (!candidate) {
       logger.info('[GALLERY] No pending volumes found on this catalog page.');
@@ -129,9 +134,36 @@ export class GalleryNavigator {
 
     await sleep(uglyRandom(600, 1400));
     await candidate.locator.scrollIntoViewIfNeeded();
-    await candidate.locator.click();
 
-    return candidate.info;
+    const context = page.context();
+    const [popupPage] = await Promise.all([
+      context.waitForEvent('page', { timeout: 8000 }).catch(() => null),
+      candidate.locator.click(),
+    ]);
+
+    let readerPage = popupPage;
+
+    if (readerPage) {
+      logger.info('[GALLERY] Reader popup window detected. Switching active context to reader modal...');
+      await readerPage.waitForLoadState('domcontentloaded').catch(() => {});
+    } else {
+      // Fallback: check if any other page exists in the context
+      const pages = context.pages();
+      const otherPage = pages.find((p) => p !== page && !p.isClosed());
+      if (otherPage) {
+        logger.info('[GALLERY] Found open reader modal window in context.');
+        await otherPage.waitForLoadState('domcontentloaded').catch(() => {});
+        readerPage = otherPage;
+      } else {
+        await page.waitForLoadState('domcontentloaded').catch(() => {});
+        readerPage = page;
+      }
+    }
+
+    return {
+      info: candidate.info,
+      readerPage,
+    };
   }
 
   async hasNextGalleryPage(page: Page): Promise<boolean> {
