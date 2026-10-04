@@ -1,4 +1,6 @@
 import fs from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import path from 'node:path';
 import { chromium, type BrowserContext, type Page } from 'playwright';
 import { USER_DATA_DIR, BASE_URL } from '../config/defaults.js';
 import type { AppConfig, RunMode } from '../config/types.js';
@@ -24,7 +26,6 @@ export class BrowserManager {
   private buildLaunchArgs(mode: RunMode): string[] {
     const args = [
       '--disable-blink-features=AutomationControlled',
-      '--no-sandbox',
       '--disable-infobars',
       '--enable-webgl',
       '--use-gl=desktop',
@@ -36,6 +37,69 @@ export class BrowserManager {
     }
 
     return args;
+  }
+
+
+  private async releaseBrowserLock(): Promise<void> {
+    if (process.platform === 'win32') {
+      await new Promise<void>((resolve) => {
+        const ps = spawn('powershell.exe', [
+          '-NoProfile',
+          '-Command',
+          "Get-CimInstance Win32_Process -Filter \"name = 'chrome.exe'\" | Where-Object { $_.CommandLine -like '*yupmanga*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
+        ]);
+        ps.on('close', () => resolve());
+        ps.on('error', () => resolve());
+      });
+    }
+
+    const lockFiles = ['lockfile', 'SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+    for (const f of lockFiles) {
+      await fs.unlink(path.join(USER_DATA_DIR, f)).catch(() => {});
+    }
+  }
+
+  private async launchPersistentWithRetry(
+    options: Parameters<typeof chromium.launchPersistentContext>[1],
+    maxAttempts = 3
+  ): Promise<BrowserContext> {
+    const launchOptions = { ...options };
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await chromium.launchPersistentContext(USER_DATA_DIR, launchOptions);
+      } catch (err: any) {
+        const isLockError =
+          err?.message?.includes('ProcessSingleton') ||
+          err?.message?.includes('Lock file') ||
+          err?.message?.includes('0x20');
+
+        if (isLockError) {
+          logger.warn(`[BROWSER] Profile directory locked (attempt ${attempt}/${maxAttempts}). Waiting and releasing resources...`);
+          if (attempt === 1) {
+            await sleep(2000);
+          } else {
+            await this.releaseBrowserLock();
+            await sleep(1500);
+          }
+          continue;
+        }
+
+        if (launchOptions.channel === 'chrome') {
+          logger.warn('[BROWSER] Chrome channel unavailable. Falling back to bundled Chromium...');
+          delete launchOptions.channel;
+          continue;
+        }
+
+        throw err;
+      }
+    }
+
+    logger.warn('[BROWSER] Forcing release of profile lock for clean start...');
+    await this.releaseBrowserLock();
+    await sleep(2000);
+    delete launchOptions.channel;
+    return await chromium.launchPersistentContext(USER_DATA_DIR, launchOptions);
   }
 
   async launch(config: AppConfig): Promise<Page> {
@@ -63,45 +127,18 @@ export class BrowserManager {
       launchOptions.proxy = { server: config.proxy };
     }
 
-    try {
-      this.context = await chromium.launchPersistentContext(USER_DATA_DIR, launchOptions);
-    } catch (err: any) {
-      if (err?.message?.includes('ProcessSingleton') || err?.message?.includes('Lock file')) {
-        logger.warn('[BROWSER] Profile lock held by closing browser. Waiting 2 seconds and retrying...');
-        await sleep(2000);
-        try {
-          this.context = await chromium.launchPersistentContext(USER_DATA_DIR, launchOptions);
-        } catch {
-          // If still locked, try with bundled Chromium
-          logger.warn('[BROWSER] Retrying with bundled Chromium...');
-          delete launchOptions.channel;
-          this.context = await chromium.launchPersistentContext(USER_DATA_DIR, launchOptions);
-        }
-      } else if (launchOptions.channel === 'chrome') {
-        logger.warn('[BROWSER] Chrome channel unavailable. Falling back to bundled Chromium...');
-        delete launchOptions.channel;
-        this.context = await chromium.launchPersistentContext(USER_DATA_DIR, launchOptions);
-      } else {
-        throw err;
-      }
-    }
+    this.context = await this.launchPersistentWithRetry(launchOptions);
 
-    if (config.antiDetection.removeWebdriverFlag) {
-      await this.context.addInitScript(() => {
-        Object.defineProperty(navigator, 'webdriver', {
-          get: () => undefined,
-        });
-      });
-    }
-
-    // Mock document.hidden and visibilityState so YupManga's reading timers never pause in background
+    // Mock document.hidden and visibilityState for YupManga reading timers without interfering with Cloudflare
     await this.context.addInitScript(() => {
       try {
-        Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
-        Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
-        Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
-        window.addEventListener('visibilitychange', (e) => e.stopImmediatePropagation(), true);
-        window.addEventListener('webkitvisibilitychange', (e) => e.stopImmediatePropagation(), true);
+        if (location.hostname && !location.hostname.includes('cloudflare')) {
+          Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+          Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+          Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
+          window.addEventListener('visibilitychange', (e) => e.stopImmediatePropagation(), true);
+          window.addEventListener('webkitvisibilitychange', (e) => e.stopImmediatePropagation(), true);
+        }
       } catch {}
     });
 
@@ -128,31 +165,27 @@ export class BrowserManager {
       '--window-size=1280,900',
     ];
 
-    let context: BrowserContext;
-    try {
-      context = await chromium.launchPersistentContext(USER_DATA_DIR, {
-        headless: false,
-        channel: 'chrome',
-        args,
-        ignoreDefaultArgs: ['--enable-automation'],
-        viewport: null,
-      });
-    } catch {
-      context = await chromium.launchPersistentContext(USER_DATA_DIR, {
-        headless: false,
-        args,
-        ignoreDefaultArgs: ['--enable-automation'],
-        viewport: null,
-      });
-    }
+    const launchOptions: Parameters<typeof chromium.launchPersistentContext>[1] = {
+      headless: false,
+      channel: 'chrome',
+      args,
+      ignoreDefaultArgs: ['--enable-automation'],
+      viewport: null,
+    };
+
+    const context = await this.launchPersistentWithRetry(launchOptions);
+    this.context = context;
 
     const page = context.pages().length > 0 ? context.pages()[0] : await context.newPage();
     const targetUrl = mangaUrl || BASE_URL;
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
 
     await new Promise<void>((resolve) => {
-      context.on('close', () => {
+      context.on('close', async () => {
         logger.info('[SETUP] Browser window closed. Session and tokens saved to ~/.yupmanga/browser-data/');
+        this.context = null;
+        this.activePage = null;
+        await sleep(1000);
         resolve();
       });
     });
@@ -168,7 +201,8 @@ export class BrowserManager {
         title.includes('Attention Required') ||
         title.includes('Just a moment') ||
         title.includes('Atención requerida') ||
-        title.includes('Cloudflare')
+        title.includes('Cloudflare') ||
+        title.includes('Blocked')
       ) {
         return true;
       }
@@ -214,13 +248,19 @@ export class BrowserManager {
     return false;
   }
 
+  private isGenericProfileText(text?: string | null): boolean {
+    if (!text) return true;
+    const clean = text.trim().toLowerCase();
+    return ['perfil', 'profile', 'mi perfil', 'my profile', 'usuario', 'cuenta', 'logged-in user'].includes(clean);
+  }
+
   async checkAuth(page: Page): Promise<AuthStatus> {
     try {
       logger.info('[AUTH] Checking account authentication status on YupManga...');
-      await page.goto('https://yupmanga.com/perfil', { waitUntil: 'domcontentloaded' });
-      await page.waitForTimeout(2000);
+      await page.goto('https://www.yupmanga.com/', { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(1500);
 
-      // If Cloudflare blocks /perfil, give user chance to solve it
+      // Handle Cloudflare if challenged on home
       if (await this.isCloudflareBlocked(page)) {
         const resolved = await this.waitForCloudflareResolve(page);
         if (!resolved) {
@@ -228,48 +268,102 @@ export class BrowserManager {
         }
       }
 
-      const content = await page.content();
-      const url = page.url();
+      // Check if logged in directly from home page header or DOM
+      const homeAuth = await page.evaluate(() => {
+        const profileLink = document.querySelector('a[href*="perfil"], a[href*="profile"]');
+        const loginLink = document.querySelector('a[href*="login"], a[href*="ingresar"]');
+        const isDataLoggedIn = document.body.getAttribute('data-logged-in') === 'true';
+        const hasStreakTopline = !!document.querySelector('.header-streak-topline');
 
-      const isLoginPage = url.includes('login') || url.includes('ingresar') || content.includes('Iniciar Sesión');
-      if (isLoginPage) {
-        return { isLoggedIn: false };
-      }
+        // Extract username from header if present
+        const headerUserEl = document.querySelector(
+          '.header-streak-topline p, [class*="username"], [class*="user-name"]'
+        );
+        const rawHeaderUsername = headerUserEl ? headerUserEl.textContent?.trim() : null;
 
-      const profileData = await page.evaluate(() => {
-        const bodyText = document.body.innerText;
-        let username = '';
-        const nameEl = document.querySelector('h1, h2, h3, [class*="username"], [class*="profile-name"]');
-        if (nameEl && nameEl.textContent) {
-          username = nameEl.textContent.trim().split('\n')[0].trim();
+        // Extract streak from header if present
+        const headerStreakEl = document.querySelector('.header-streak-count');
+        let headerStreak = '';
+        if (headerStreakEl) {
+          const titleAttr = headerStreakEl.getAttribute('title') || '';
+          const m = titleAttr.match(/Racha actual:\s*(\d+)/i) || headerStreakEl.textContent?.match(/(\d+)/);
+          if (m) headerStreak = `${m[1]} dias`;
         }
 
-        let streak = '';
-        const streakMatch = bodyText.match(/(\d+)\s*d[ií]as\s*Racha\s*actual/i) || bodyText.match(/Racha.*?(\d+)\s*d[ií]as/i);
-        if (streakMatch) streak = `${streakMatch[1]} dias`;
-
-        let caps = '';
-        const capsMatch = bodyText.match(/(\d+)\s*Caps/i);
-        if (capsMatch) caps = capsMatch[1];
-
-        let series = '';
-        const seriesMatch = bodyText.match(/(\d+)\s*Series/i);
-        if (seriesMatch) series = seriesMatch[1];
+        const isLoggedIn = isDataLoggedIn || hasStreakTopline || (!!profileLink && !loginLink);
 
         return {
-          username: username || 'Logged-In User',
-          streak,
-          caps,
-          series,
+          isLoggedIn,
+          hasLogin: !!loginLink,
+          headerUsername: rawHeaderUsername,
+          headerStreak,
         };
       });
 
+      if (!homeAuth.isLoggedIn) {
+        return { isLoggedIn: false };
+      }
+
+      let username = !this.isGenericProfileText(homeAuth.headerUsername) ? homeAuth.headerUsername! : '';
+      let streak = homeAuth.headerStreak || '';
+      let caps = '';
+      let series = '';
+
+      // Safely try to read stats and confirmed username from /perfil
+      try {
+        await page.goto('https://www.yupmanga.com/perfil', { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(1500);
+
+        if (await this.isCloudflareBlocked(page)) {
+          await this.waitForCloudflareResolve(page);
+        }
+
+        if (!(await this.isCloudflareBlocked(page))) {
+          const profileStats = await page.evaluate(() => {
+            const bodyText = document.body.innerText;
+
+            // Extract username from h1 or profile heading
+            const h1El = document.querySelector('h1');
+            let profileUser = h1El ? h1El.textContent?.trim() : '';
+
+            if (!profileUser) {
+              const statsMatch = bodyText.match(/Estadísticas de\s+([^\n\r]+)/i);
+              if (statsMatch) profileUser = statsMatch[1].trim();
+            }
+
+            // Extract reading stats
+            let s = '';
+            const sMatch = bodyText.match(/(\d+)\s*d[ií]as\s*Racha\s*actual/i) || bodyText.match(/Racha.*?(\d+)\s*d[ií]as/i);
+            if (sMatch) s = `${sMatch[1]} dias`;
+
+            let c = '';
+            const cMatch = bodyText.match(/(\d+)\s*Caps/i);
+            if (cMatch) c = cMatch[1];
+
+            let ser = '';
+            const serMatch = bodyText.match(/(\d+)\s*Series/i);
+            if (serMatch) ser = serMatch[1];
+
+            return { profileUser, s, c, ser };
+          });
+
+          if (profileStats.profileUser && !this.isGenericProfileText(profileStats.profileUser)) {
+            username = profileStats.profileUser;
+          }
+          if (profileStats.s) streak = profileStats.s;
+          if (profileStats.c) caps = profileStats.c;
+          if (profileStats.ser) series = profileStats.ser;
+        }
+      } catch (err) {
+        logger.debug({ err }, '[AUTH] Could not fetch details from /perfil');
+      }
+
       return {
         isLoggedIn: true,
-        username: profileData.username,
-        streak: profileData.streak,
-        caps: profileData.caps,
-        series: profileData.series,
+        username: username || 'Usuario Conectado',
+        streak,
+        caps,
+        series,
       };
     } catch (error) {
       logger.debug({ error }, '[AUTH] Error checking authentication');
@@ -279,9 +373,10 @@ export class BrowserManager {
 
   async close(): Promise<void> {
     if (this.context) {
-      await this.context.close();
+      await this.context.close().catch(() => {});
       this.context = null;
       this.activePage = null;
+      await sleep(1000);
     }
   }
 

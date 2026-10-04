@@ -8,7 +8,7 @@ export const QUEUE_FILE_PATH = path.join(os.homedir(), '.yupmanga', 'queue.json'
 export const PROGRESS_FILE_PATH = path.join(os.homedir(), '.yupmanga', 'progress.json');
 export const LOGS_DIR = path.join(os.homedir(), '.yupmanga', 'logs');
 
-export const BASE_URL = 'https://yupmanga.com';
+export const BASE_URL = 'https://www.yupmanga.com';
 
 export const SELECTORS = {
   // Galería y volúmenes
@@ -16,9 +16,9 @@ export const SELECTORS = {
   VOLUME_BADGE: '[class*="absolute"][class*="top-0"][class*="left-0"]',
   
   // Publicidad intermedia previa al reader
-  AD_MODAL_CONTAINER: 'div:has-text("Un momento y podrás seguir leyendo"), div:has(#btn-continue)',
+  AD_MODAL_CONTAINER: 'div:has-text("Un momento y podrás seguir leyendo"), div:has(#continueBtn), div:has(#btn-continue)',
   AD_COUNTDOWN_TEXT: 'text=/Espera \\d+ segundos/i',
-  AD_CONTINUE_BUTTON: '#btn-continue, a:has-text("Continuar al capítulo"), a:has-text("Continuar al capitulo"), button:has-text("Continuar")',
+  AD_CONTINUE_BUTTON: '#continueBtn, #continueBtnMobileTop, .continue-button, #btn-continue button, button:has-text("Continuar al capítulo"), #btn-continue, a:has-text("Continuar al capítulo"), button:has-text("Continuar")',
 
   // Reader
   READER_PAGE_INFO: 'text=/Página\\s+\\d+\\s+de\\s+\\d+/i',
