@@ -17,31 +17,95 @@ export class ReaderAutomation {
    */
   async handleAdIfPresent(page: Page, contextDescription = 'Reader'): Promise<boolean> {
     try {
-      const continueBtn = page
-        .locator(
-          '#btn-continue, a:has-text("Continuar al capítulo"), button:has-text("Continuar al capítulo"), a:has-text("Continuar"), button:has-text("Continuar"), a:has-text("Volver"), button:has-text("Volver")'
-        )
-        .first();
+      if (page.isClosed()) return false;
+
+      const continueSelector =
+        '#continueBtn, #continueBtnMobileTop, .continue-button, #btn-continue, #btn-continue button, button:has-text("Continuar al capítulo"), a:has-text("Continuar al capítulo"), button:has-text("Continuar")';
 
       const hasAdOrBtn =
+        (await page.locator(continueSelector).count()) > 0 ||
         (await page.locator('text="Un momento y podrás seguir leyendo"').count()) > 0 ||
         (await page.locator('text=/Espera \\d+ segundos/i').count()) > 0 ||
-        (await continueBtn.count()) > 0;
+        page.url().includes('box-modal') ||
+        page.url().includes('interstitial');
 
       if (!hasAdOrBtn) return false;
 
       logger.info(`[AD] Interstitial ad detected [${contextDescription}]. Waiting for countdown to finish...`);
 
-      // Wait up to 18 seconds for the continue/dismiss button to become active
-      await continueBtn.waitFor({ state: 'visible', timeout: 18_000 });
+      // 1. Wait for countdown to finish: button must be visible, enabled, and active
+      try {
+        await page.waitForFunction(() => {
+          const btn =
+            document.getElementById('continueBtn') ||
+            document.getElementById('continueBtnMobileTop') ||
+            document.querySelector('.continue-button') ||
+            document.getElementById('btn-continue') ||
+            Array.from(document.querySelectorAll('button, a')).find((el) =>
+              el.textContent?.includes('Continuar')
+            );
+          if (!btn) return false;
+
+          const style = window.getComputedStyle(btn);
+          if (style.display === 'none' || style.visibility === 'hidden') return false;
+          if (btn.classList.contains('pointer-events-none') || btn.classList.contains('opacity-50')) return false;
+          if ((btn as HTMLButtonElement).disabled) return false;
+
+          const bodyText = document.body.innerText || '';
+          if (/Espera \d+ segundos/i.test(bodyText) && !btn.classList.contains('is-visible')) {
+            return false;
+          }
+
+          return true;
+        }, { timeout: 20_000 });
+      } catch {
+        logger.debug('[AD] Countdown wait timeout, attempting to continue directly...');
+      }
 
       logger.info(`[AD] Countdown finished [${contextDescription}]. Clicking continue button...`);
-      await sleep(uglyRandom(900, 1600));
-      await continueBtn.click();
+      await sleep(uglyRandom(600, 1200));
 
-      logger.info(`[AD] Successfully dismissed ad [${contextDescription}].`);
-      await page.waitForLoadState('domcontentloaded');
+      // Click via DOM evaluate first (executes native onclick/navigation)
+      await page.evaluate(() => {
+        const btn =
+          document.getElementById('continueBtn') ||
+          document.getElementById('continueBtnMobileTop') ||
+          (document.querySelector('.continue-button') as HTMLElement | null) ||
+          document.getElementById('btn-continue') ||
+          (Array.from(document.querySelectorAll('button, a')).find((el) =>
+            el.textContent?.includes('Continuar')
+          ) as HTMLElement | null);
+
+        if (btn) {
+          btn.click();
+          const inner = btn.querySelector('button');
+          if (inner) inner.click();
+        }
+      }).catch(() => {});
+
+      const continueBtn = page.locator(continueSelector).first();
+      if (await continueBtn.isVisible().catch(() => false)) {
+        await continueBtn.click({ force: true }).catch(() => {});
+      }
+
+      logger.info(`[AD] Clicked continue button [${contextDescription}]. Transitioning to reader...`);
+
+      // Wait for navigation or reader elements to appear
+      try {
+        await Promise.race([
+          page.waitForURL((url) => !url.href.includes('box-modal') && !url.href.includes('interstitial'), {
+            timeout: 10_000,
+          }),
+          page.waitForSelector('button:has-text("Cerrar"), text=/Página\\s+\\d+\\s+de\\s+\\d+/i', {
+            timeout: 10_000,
+          }),
+        ]);
+      } catch {
+        await page.waitForLoadState('domcontentloaded').catch(() => {});
+      }
+
       await sleep(uglyRandom(1500, 2500));
+      logger.info(`[AD] Successfully transitioned to reader [${contextDescription}].`);
 
       return true;
     } catch (error) {
@@ -108,16 +172,23 @@ export class ReaderAutomation {
 
   async closeReader(page: Page): Promise<boolean> {
     try {
+      if (page.isClosed()) return true;
+
       const closeBtn = page.locator(SELECTORS.READER_CLOSE_BUTTON).first();
       if (await closeBtn.isVisible({ timeout: 2500 })) {
         logger.info('[READER] Volume finished. Clicking Close to return to gallery...');
         await sleep(uglyRandom(800, 1600));
-        await closeBtn.click();
-        await page.waitForLoadState('domcontentloaded');
-        await sleep(uglyRandom(1200, 2000));
 
-        // Handle exit ad if YupManga displays an interstitial countdown upon closing the reader!
-        await this.handleAdIfPresent(page, 'Exiting reader');
+        const closePromise = page.waitForEvent('close', { timeout: 4000 }).catch(() => null);
+        await closeBtn.click();
+        await closePromise;
+
+        if (!page.isClosed()) {
+          await page.waitForLoadState('domcontentloaded').catch(() => {});
+          await sleep(uglyRandom(1200, 2000));
+          // Handle exit ad if YupManga displays an interstitial countdown upon closing the reader!
+          await this.handleAdIfPresent(page, 'Exiting reader');
+        }
 
         return true;
       }
@@ -156,12 +227,30 @@ export class ReaderAutomation {
       for (let attempt = 0; attempt < 8; attempt++) {
         await sleep(1500);
 
-        // Double check: if #btn-continue is still visible, click it
-        const continueBtn = page.locator('#btn-continue, a:has-text("Continuar al capítulo")').first();
+        // Double check: if continue button is still visible, click it
+        const continueSelector =
+          '#continueBtn, #continueBtnMobileTop, .continue-button, #btn-continue, #btn-continue button, button:has-text("Continuar al capítulo"), button:has-text("Continuar")';
+        const continueBtn = page.locator(continueSelector).first();
         if (await continueBtn.isVisible().catch(() => false)) {
-          logger.info('[READER] Re-clicking "Continuar al capítulo" to ensure entry...');
-          await continueBtn.click();
-          await page.waitForLoadState('domcontentloaded');
+          logger.info('[READER] Re-clicking continue button to ensure entry...');
+          await page.evaluate(() => {
+            const btn =
+              document.getElementById('continueBtn') ||
+              document.getElementById('continueBtnMobileTop') ||
+              (document.querySelector('.continue-button') as HTMLElement | null) ||
+              document.getElementById('btn-continue') ||
+              (Array.from(document.querySelectorAll('button, a')).find((el) =>
+                el.textContent?.includes('Continuar')
+              ) as HTMLElement | null);
+            if (btn) {
+              btn.click();
+              const inner = btn.querySelector('button');
+              if (inner) inner.click();
+            }
+          }).catch(() => {});
+          await continueBtn.click({ force: true }).catch(() => {});
+          await page.waitForTimeout(2000);
+          await page.waitForLoadState('domcontentloaded').catch(() => {});
         }
 
         initialInfo = await this.getPageInfo(page);
