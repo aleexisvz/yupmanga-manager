@@ -143,7 +143,8 @@ export class BrowserManager {
     });
 
     const pages = this.context.pages();
-    this.activePage = pages.length > 0 ? pages[0] : await this.context.newPage();
+    const firstPage = pages[0];
+    this.activePage = firstPage ?? (await this.context.newPage());
 
     return this.activePage;
   }
@@ -176,7 +177,9 @@ export class BrowserManager {
     const context = await this.launchPersistentWithRetry(launchOptions);
     this.context = context;
 
-    const page = context.pages().length > 0 ? context.pages()[0] : await context.newPage();
+    const pages = context.pages();
+    const firstPage = pages[0];
+    const page = firstPage ?? (await context.newPage());
     const targetUrl = mangaUrl || BASE_URL;
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
 
@@ -324,25 +327,25 @@ export class BrowserManager {
 
             // Extract username from h1 or profile heading
             const h1El = document.querySelector('h1');
-            let profileUser = h1El ? h1El.textContent?.trim() : '';
+            let profileUser = h1El?.textContent?.trim() || '';
 
             if (!profileUser) {
               const statsMatch = bodyText.match(/Estadísticas de\s+([^\n\r]+)/i);
-              if (statsMatch) profileUser = statsMatch[1].trim();
+              if (statsMatch?.[1]) profileUser = statsMatch[1].trim();
             }
 
             // Extract reading stats
             let s = '';
             const sMatch = bodyText.match(/(\d+)\s*d[ií]as\s*Racha\s*actual/i) || bodyText.match(/Racha.*?(\d+)\s*d[ií]as/i);
-            if (sMatch) s = `${sMatch[1]} dias`;
+            if (sMatch?.[1]) s = `${sMatch[1]} dias`;
 
             let c = '';
             const cMatch = bodyText.match(/(\d+)\s*Caps/i);
-            if (cMatch) c = cMatch[1];
+            if (cMatch?.[1]) c = cMatch[1];
 
             let ser = '';
             const serMatch = bodyText.match(/(\d+)\s*Series/i);
-            if (serMatch) ser = serMatch[1];
+            if (serMatch?.[1]) ser = serMatch[1];
 
             return { profileUser, s, c, ser };
           });

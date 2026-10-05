@@ -133,7 +133,7 @@ export class ReaderAutomation {
           if (el.children.length > 8) continue;
           const text = el.textContent || '';
           const match = text.match(/P[aá]gina\s+(\d+)\s+de\s+(\d+)/i);
-          if (match) {
+          if (match?.[1] && match?.[2]) {
             return {
               currentPage: parseInt(match[1], 10),
               totalPages: parseInt(match[2], 10),
