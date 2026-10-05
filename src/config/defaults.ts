@@ -11,26 +11,41 @@ export const LOGS_DIR = path.join(os.homedir(), '.yupmanga', 'logs');
 export const BASE_URL = 'https://www.yupmanga.com';
 
 export const SELECTORS = {
-  // Galería y volúmenes
+  // Gallery and volumes
   CHAPTER_LINK: 'a.chapter-link',
   VOLUME_BADGE: '[class*="absolute"][class*="top-0"][class*="left-0"]',
-  
-  // Publicidad intermedia previa al reader
-  AD_MODAL_CONTAINER: 'div:has-text("Un momento y podrás seguir leyendo"), div:has(#continueBtn), div:has(#btn-continue)',
-  AD_COUNTDOWN_TEXT: 'text=/Espera \\d+ segundos/i',
-  AD_CONTINUE_BUTTON: '#continueBtn, #continueBtnMobileTop, .continue-button, #btn-continue button, button:has-text("Continuar al capítulo"), #btn-continue, a:has-text("Continuar al capítulo"), button:has-text("Continuar")',
+  PAGINATION_BUTTONS: 'a, button',
+  PAGINATION_NEXT_REGEX: /^(siguiente|next|›|»)$/i,
+  SERIES_CARDS: 'a[href*="/series/"], a[href*="/manga/"]',
 
-  // Reader
+  // Interstitial ad & transition
+  AD_MODAL_CONTAINER:
+    'div:has-text("Un momento y podrás seguir leyendo"), div:has(#continueBtn), div:has(#btn-continue)',
+  AD_MESSAGE_TEXT: 'text="Un momento y podrás seguir leyendo"',
+  AD_COUNTDOWN_TEXT: 'text=/Espera \\d+ segundos/i',
+  AD_CONTINUE_BUTTON:
+    '#continueBtn, #continueBtnMobileTop, .continue-button, #btn-continue, #btn-continue button, button:has-text("Continuar al capítulo"), a:has-text("Continuar al capítulo"), button:has-text("Continuar")',
+
+  // Reader interface
   READER_PAGE_INFO: 'text=/Página\\s+\\d+\\s+de\\s+\\d+/i',
   READER_CLOSE_BUTTON: 'button:has-text("Cerrar")',
   READER_NEXT_BUTTON: 'button[aria-label="Next"], .reader-next, button:has-text(">")',
-  
-  // Navegación del sitio
+  READER_READY_INDICATORS: 'button:has-text("Cerrar"), text=/Página\\s+\\d+\\s+de\\s+\\d+/i',
+
+  // Site navigation
   NAV_HOME: 'a[href="/"], a:has-text("Inicio")',
   NAV_CATEGORIES: 'a[href*="categorias"], a:has-text("Categorías")',
   NAV_LISTS: 'a[href*="listas"], a:has-text("Listas")',
   NAV_SEARCH: 'input[placeholder*="buscar" i]',
   NAV_PROFILE_AVATAR: 'img[alt*="avatar" i], a[href*="perfil"], a[href*="usuario"], button:has(img)',
+
+  // Auth and challenge detection
+  CLOUDFLARE_CHALLENGE: 'iframe[src*="challenges.cloudflare.com"], form#challenge-form, #cf-turnstile',
+  HEADER_STREAK_TOPLINE: '.header-streak-topline',
+  HEADER_USER: '.header-streak-topline p, [class*="username"], [class*="user-name"]',
+  HEADER_STREAK_COUNT: '.header-streak-count',
+  PROFILE_LINKS: 'a[href*="perfil"], a[href*="profile"]',
+  LOGIN_LINKS: 'a[href*="login"], a[href*="ingresar"]',
 } as const;
 
 export const DEFAULT_CONFIG: AppConfig = {

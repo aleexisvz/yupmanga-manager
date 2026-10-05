@@ -167,8 +167,8 @@ export class GalleryNavigator {
   }
 
   async hasNextGalleryPage(page: Page): Promise<boolean> {
-    const nextButtons = page.locator('a, button').filter({
-      hasText: /^(siguiente|next|›|»)$/i,
+    const nextButtons = page.locator(SELECTORS.PAGINATION_BUTTONS).filter({
+      hasText: SELECTORS.PAGINATION_NEXT_REGEX,
     });
 
     const count = await nextButtons.count();
@@ -183,8 +183,8 @@ export class GalleryNavigator {
   }
 
   async goToNextGalleryPage(page: Page): Promise<boolean> {
-    const nextButtons = page.locator('a, button').filter({
-      hasText: /^(siguiente|next|›|»)$/i,
+    const nextButtons = page.locator(SELECTORS.PAGINATION_BUTTONS).filter({
+      hasText: SELECTORS.PAGINATION_NEXT_REGEX,
     });
 
     const count = await nextButtons.count();

@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { chromium, type BrowserContext, type Page } from 'playwright';
-import { USER_DATA_DIR, BASE_URL } from '../config/defaults.js';
+import { USER_DATA_DIR, BASE_URL, SELECTORS } from '../config/defaults.js';
 import type { AppConfig, RunMode } from '../config/types.js';
 import { logger } from '../logger.js';
 import { sleep } from '../utils/delay.js';
@@ -211,7 +211,7 @@ export class BrowserManager {
       }
 
       const hasTurnstile = await page
-        .locator('iframe[src*="challenges.cloudflare.com"], form#challenge-form, #cf-turnstile')
+        .locator(SELECTORS.CLOUDFLARE_CHALLENGE)
         .count();
       if (hasTurnstile > 0) {
         return true;
@@ -272,20 +272,19 @@ export class BrowserManager {
       }
 
       // Check if logged in directly from home page header or DOM
-      const homeAuth = await page.evaluate(() => {
-        const profileLink = document.querySelector('a[href*="perfil"], a[href*="profile"]');
-        const loginLink = document.querySelector('a[href*="login"], a[href*="ingresar"]');
-        const isDataLoggedIn = document.body.getAttribute('data-logged-in') === 'true';
-        const hasStreakTopline = !!document.querySelector('.header-streak-topline');
+      const homeAuth = await page.evaluate(
+        (sel) => {
+          const profileLink = document.querySelector(sel.PROFILE_LINKS);
+          const loginLink = document.querySelector(sel.LOGIN_LINKS);
+          const isDataLoggedIn = document.body.getAttribute('data-logged-in') === 'true';
+          const hasStreakTopline = !!document.querySelector(sel.HEADER_STREAK_TOPLINE);
 
-        // Extract username from header if present
-        const headerUserEl = document.querySelector(
-          '.header-streak-topline p, [class*="username"], [class*="user-name"]'
-        );
-        const rawHeaderUsername = headerUserEl ? headerUserEl.textContent?.trim() : null;
+          // Extract username from header if present
+          const headerUserEl = document.querySelector(sel.HEADER_USER);
+          const rawHeaderUsername = headerUserEl ? headerUserEl.textContent?.trim() : null;
 
-        // Extract streak from header if present
-        const headerStreakEl = document.querySelector('.header-streak-count');
+          // Extract streak from header if present
+          const headerStreakEl = document.querySelector(sel.HEADER_STREAK_COUNT);
         let headerStreak = '';
         if (headerStreakEl) {
           const titleAttr = headerStreakEl.getAttribute('title') || '';
@@ -301,6 +300,12 @@ export class BrowserManager {
           headerUsername: rawHeaderUsername,
           headerStreak,
         };
+      }, {
+        PROFILE_LINKS: SELECTORS.PROFILE_LINKS,
+        LOGIN_LINKS: SELECTORS.LOGIN_LINKS,
+        HEADER_STREAK_TOPLINE: SELECTORS.HEADER_STREAK_TOPLINE,
+        HEADER_USER: SELECTORS.HEADER_USER,
+        HEADER_STREAK_COUNT: SELECTORS.HEADER_STREAK_COUNT,
       });
 
       if (!homeAuth.isLoggedIn) {

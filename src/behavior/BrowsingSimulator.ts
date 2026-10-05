@@ -64,7 +64,7 @@ export class BrowsingSimulator {
   async browseManga(page: Page): Promise<void> {
     logger.info('[BROWSE] Inspecting a random manga synopsis...');
     try {
-      const seriesCards = page.locator('a[href*="/series/"], a[href*="/manga/"]');
+      const seriesCards = page.locator(SELECTORS.SERIES_CARDS);
       const count = await seriesCards.count();
 
       if (count > 0) {
