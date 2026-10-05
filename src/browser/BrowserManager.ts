@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { chromium, type BrowserContext, type Page } from 'playwright';
-import { USER_DATA_DIR, BASE_URL } from '../config/defaults.js';
+import { USER_DATA_DIR, BASE_URL, SELECTORS } from '../config/defaults.js';
 import type { AppConfig, RunMode } from '../config/types.js';
 import { logger } from '../logger.js';
 import { sleep } from '../utils/delay.js';
@@ -143,7 +143,8 @@ export class BrowserManager {
     });
 
     const pages = this.context.pages();
-    this.activePage = pages.length > 0 ? pages[0] : await this.context.newPage();
+    const firstPage = pages[0];
+    this.activePage = firstPage ?? (await this.context.newPage());
 
     return this.activePage;
   }
@@ -176,7 +177,9 @@ export class BrowserManager {
     const context = await this.launchPersistentWithRetry(launchOptions);
     this.context = context;
 
-    const page = context.pages().length > 0 ? context.pages()[0] : await context.newPage();
+    const pages = context.pages();
+    const firstPage = pages[0];
+    const page = firstPage ?? (await context.newPage());
     const targetUrl = mangaUrl || BASE_URL;
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
 
@@ -208,7 +211,7 @@ export class BrowserManager {
       }
 
       const hasTurnstile = await page
-        .locator('iframe[src*="challenges.cloudflare.com"], form#challenge-form, #cf-turnstile')
+        .locator(SELECTORS.CLOUDFLARE_CHALLENGE)
         .count();
       if (hasTurnstile > 0) {
         return true;
@@ -269,20 +272,19 @@ export class BrowserManager {
       }
 
       // Check if logged in directly from home page header or DOM
-      const homeAuth = await page.evaluate(() => {
-        const profileLink = document.querySelector('a[href*="perfil"], a[href*="profile"]');
-        const loginLink = document.querySelector('a[href*="login"], a[href*="ingresar"]');
-        const isDataLoggedIn = document.body.getAttribute('data-logged-in') === 'true';
-        const hasStreakTopline = !!document.querySelector('.header-streak-topline');
+      const homeAuth = await page.evaluate(
+        (sel) => {
+          const profileLink = document.querySelector(sel.PROFILE_LINKS);
+          const loginLink = document.querySelector(sel.LOGIN_LINKS);
+          const isDataLoggedIn = document.body.getAttribute('data-logged-in') === 'true';
+          const hasStreakTopline = !!document.querySelector(sel.HEADER_STREAK_TOPLINE);
 
-        // Extract username from header if present
-        const headerUserEl = document.querySelector(
-          '.header-streak-topline p, [class*="username"], [class*="user-name"]'
-        );
-        const rawHeaderUsername = headerUserEl ? headerUserEl.textContent?.trim() : null;
+          // Extract username from header if present
+          const headerUserEl = document.querySelector(sel.HEADER_USER);
+          const rawHeaderUsername = headerUserEl ? headerUserEl.textContent?.trim() : null;
 
-        // Extract streak from header if present
-        const headerStreakEl = document.querySelector('.header-streak-count');
+          // Extract streak from header if present
+          const headerStreakEl = document.querySelector(sel.HEADER_STREAK_COUNT);
         let headerStreak = '';
         if (headerStreakEl) {
           const titleAttr = headerStreakEl.getAttribute('title') || '';
@@ -298,6 +300,12 @@ export class BrowserManager {
           headerUsername: rawHeaderUsername,
           headerStreak,
         };
+      }, {
+        PROFILE_LINKS: SELECTORS.PROFILE_LINKS,
+        LOGIN_LINKS: SELECTORS.LOGIN_LINKS,
+        HEADER_STREAK_TOPLINE: SELECTORS.HEADER_STREAK_TOPLINE,
+        HEADER_USER: SELECTORS.HEADER_USER,
+        HEADER_STREAK_COUNT: SELECTORS.HEADER_STREAK_COUNT,
       });
 
       if (!homeAuth.isLoggedIn) {
@@ -324,25 +332,25 @@ export class BrowserManager {
 
             // Extract username from h1 or profile heading
             const h1El = document.querySelector('h1');
-            let profileUser = h1El ? h1El.textContent?.trim() : '';
+            let profileUser = h1El?.textContent?.trim() || '';
 
             if (!profileUser) {
               const statsMatch = bodyText.match(/Estadísticas de\s+([^\n\r]+)/i);
-              if (statsMatch) profileUser = statsMatch[1].trim();
+              if (statsMatch?.[1]) profileUser = statsMatch[1].trim();
             }
 
             // Extract reading stats
             let s = '';
             const sMatch = bodyText.match(/(\d+)\s*d[ií]as\s*Racha\s*actual/i) || bodyText.match(/Racha.*?(\d+)\s*d[ií]as/i);
-            if (sMatch) s = `${sMatch[1]} dias`;
+            if (sMatch?.[1]) s = `${sMatch[1]} dias`;
 
             let c = '';
             const cMatch = bodyText.match(/(\d+)\s*Caps/i);
-            if (cMatch) c = cMatch[1];
+            if (cMatch?.[1]) c = cMatch[1];
 
             let ser = '';
             const serMatch = bodyText.match(/(\d+)\s*Series/i);
-            if (serMatch) ser = serMatch[1];
+            if (serMatch?.[1]) ser = serMatch[1];
 
             return { profileUser, s, c, ser };
           });

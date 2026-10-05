@@ -19,13 +19,10 @@ export class ReaderAutomation {
     try {
       if (page.isClosed()) return false;
 
-      const continueSelector =
-        '#continueBtn, #continueBtnMobileTop, .continue-button, #btn-continue, #btn-continue button, button:has-text("Continuar al capítulo"), a:has-text("Continuar al capítulo"), button:has-text("Continuar")';
-
       const hasAdOrBtn =
-        (await page.locator(continueSelector).count()) > 0 ||
-        (await page.locator('text="Un momento y podrás seguir leyendo"').count()) > 0 ||
-        (await page.locator('text=/Espera \\d+ segundos/i').count()) > 0 ||
+        (await page.locator(SELECTORS.AD_CONTINUE_BUTTON).count()) > 0 ||
+        (await page.locator(SELECTORS.AD_MESSAGE_TEXT).count()) > 0 ||
+        (await page.locator(SELECTORS.AD_COUNTDOWN_TEXT).count()) > 0 ||
         page.url().includes('box-modal') ||
         page.url().includes('interstitial');
 
@@ -83,7 +80,7 @@ export class ReaderAutomation {
         }
       }).catch(() => {});
 
-      const continueBtn = page.locator(continueSelector).first();
+      const continueBtn = page.locator(SELECTORS.AD_CONTINUE_BUTTON).first();
       if (await continueBtn.isVisible().catch(() => false)) {
         await continueBtn.click({ force: true }).catch(() => {});
       }
@@ -96,7 +93,7 @@ export class ReaderAutomation {
           page.waitForURL((url) => !url.href.includes('box-modal') && !url.href.includes('interstitial'), {
             timeout: 10_000,
           }),
-          page.waitForSelector('button:has-text("Cerrar"), text=/Página\\s+\\d+\\s+de\\s+\\d+/i', {
+          page.waitForSelector(SELECTORS.READER_READY_INDICATORS, {
             timeout: 10_000,
           }),
         ]);
@@ -133,7 +130,7 @@ export class ReaderAutomation {
           if (el.children.length > 8) continue;
           const text = el.textContent || '';
           const match = text.match(/P[aá]gina\s+(\d+)\s+de\s+(\d+)/i);
-          if (match) {
+          if (match?.[1] && match?.[2]) {
             return {
               currentPage: parseInt(match[1], 10),
               totalPages: parseInt(match[2], 10),
@@ -228,9 +225,7 @@ export class ReaderAutomation {
         await sleep(1500);
 
         // Double check: if continue button is still visible, click it
-        const continueSelector =
-          '#continueBtn, #continueBtnMobileTop, .continue-button, #btn-continue, #btn-continue button, button:has-text("Continuar al capítulo"), button:has-text("Continuar")';
-        const continueBtn = page.locator(continueSelector).first();
+        const continueBtn = page.locator(SELECTORS.AD_CONTINUE_BUTTON).first();
         if (await continueBtn.isVisible().catch(() => false)) {
           logger.info('[READER] Re-clicking continue button to ensure entry...');
           await page.evaluate(() => {

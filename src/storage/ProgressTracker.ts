@@ -1,17 +1,18 @@
 import fs from 'node:fs/promises';
-import path from 'node:path';
 import { PROGRESS_FILE_PATH } from '../config/defaults.js';
+import { ReadingProgressMapSchema } from '../config/schemas.js';
 import type { ReadingProgressRecord } from '../config/types.js';
+import { atomicWriteJson, backupCorruptedFile } from '../utils/fileSystem.js';
+import { logger } from '../logger.js';
 
 export class ProgressTracker {
   private records: Record<string, ReadingProgressRecord> = {};
 
   private async ensureFile(): Promise<void> {
     try {
-      await fs.mkdir(path.dirname(PROGRESS_FILE_PATH), { recursive: true });
       await fs.access(PROGRESS_FILE_PATH);
     } catch {
-      await fs.writeFile(PROGRESS_FILE_PATH, '{}', 'utf-8');
+      await atomicWriteJson(PROGRESS_FILE_PATH, {});
     }
   }
 
@@ -19,16 +20,20 @@ export class ProgressTracker {
     await this.ensureFile();
     try {
       const data = await fs.readFile(PROGRESS_FILE_PATH, 'utf-8');
-      this.records = JSON.parse(data);
-    } catch {
+      const parsed = JSON.parse(data);
+      this.records = ReadingProgressMapSchema.parse(parsed) as Record<string, ReadingProgressRecord>;
+    } catch (error: any) {
+      if (error?.code !== 'ENOENT') {
+        logger.warn({ error }, '⚠️ Corrupted or invalid progress file. Creating backup...');
+        await backupCorruptedFile(PROGRESS_FILE_PATH);
+      }
       this.records = {};
     }
     return this.records;
   }
 
   async save(): Promise<void> {
-    await this.ensureFile();
-    await fs.writeFile(PROGRESS_FILE_PATH, JSON.stringify(this.records, null, 2), 'utf-8');
+    await atomicWriteJson(PROGRESS_FILE_PATH, this.records);
   }
 
   async recordSession(

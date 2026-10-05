@@ -1,22 +1,18 @@
 import fs from 'node:fs/promises';
-import path from 'node:path';
 import { QUEUE_FILE_PATH } from '../config/defaults.js';
+import { MangaQueueSchema } from '../config/schemas.js';
 import type { MangaEntry } from '../config/types.js';
+import { atomicWriteJson, backupCorruptedFile } from '../utils/fileSystem.js';
 import { logger } from '../logger.js';
 
 export class MangaQueue {
   private entries: MangaEntry[] = [];
 
-  constructor() {
-    this.ensureFileExists();
-  }
-
   private async ensureFileExists(): Promise<void> {
     try {
-      await fs.mkdir(path.dirname(QUEUE_FILE_PATH), { recursive: true });
       await fs.access(QUEUE_FILE_PATH);
     } catch {
-      await fs.writeFile(QUEUE_FILE_PATH, '[]', 'utf-8');
+      await atomicWriteJson(QUEUE_FILE_PATH, []);
     }
   }
 
@@ -24,16 +20,20 @@ export class MangaQueue {
     await this.ensureFileExists();
     try {
       const content = await fs.readFile(QUEUE_FILE_PATH, 'utf-8');
-      this.entries = JSON.parse(content);
-    } catch {
+      const parsed = JSON.parse(content);
+      this.entries = MangaQueueSchema.parse(parsed) as MangaEntry[];
+    } catch (error: any) {
+      if (error?.code !== 'ENOENT') {
+        logger.warn({ error }, '⚠️ Corrupted or invalid queue file. Creating backup...');
+        await backupCorruptedFile(QUEUE_FILE_PATH);
+      }
       this.entries = [];
     }
     return this.entries;
   }
 
   async save(): Promise<void> {
-    await this.ensureFileExists();
-    await fs.writeFile(QUEUE_FILE_PATH, JSON.stringify(this.entries, null, 2), 'utf-8');
+    await atomicWriteJson(QUEUE_FILE_PATH, this.entries);
   }
 
   async add(url: string, title: string): Promise<MangaEntry> {
@@ -93,7 +93,7 @@ export class MangaQueue {
       .filter((m) => m.status === 'queued')
       .sort((a, b) => a.priority - b.priority);
 
-    if (queued.length > 0) {
+    if (queued.length > 0 && queued[0]) {
       queued[0].status = 'reading';
       await this.save();
       return queued[0];
