@@ -1,8 +1,8 @@
 import type { Page } from 'playwright';
-import { SELECTORS } from '../config/defaults.js';
+import { SELECTORS, SPEED_PROFILES } from '../config/defaults.js';
 import type { AppConfig, PageInfo } from '../config/types.js';
 import { logger } from '../logger.js';
-import { sleep, uglyRandom, getTimeMultiplier } from '../utils/delay.js';
+import { sleep, uglyRandom, getTimeMultiplier, calculatePageDelay } from '../utils/delay.js';
 
 export interface ReadingSessionResult {
   pagesRead: number;
@@ -173,7 +173,7 @@ export class ReaderAutomation {
 
       const closeBtn = page.locator(SELECTORS.READER_CLOSE_BUTTON).first();
       if (await closeBtn.isVisible({ timeout: 2500 })) {
-        logger.info('[READER] Volume finished. Clicking Close to return to gallery...');
+        logger.info('[READER] Clicking Close to return to gallery...');
         await sleep(uglyRandom(800, 1600));
 
         const closePromise = page.waitForEvent('close', { timeout: 4000 }).catch(() => null);
@@ -210,11 +210,11 @@ export class ReaderAutomation {
     let volumeCompleted = false;
     let lastInfo: PageInfo = { currentPage: 1, totalPages: 1 };
 
-    // Dynamic session variation between 30% and 60%
-    const sessionVariation = uglyRandom(30.0, 60.0);
+    const speed = config.readingSpeed || 'normal';
+    const profile = SPEED_PROFILES[speed] || SPEED_PROFILES.normal;
 
     logger.info(
-      `[READER] Starting reading block: target ${targetPagesCount} pages (pace base: 9-18s with +${sessionVariation}% variation)...`
+      `[READER] Starting reading block: target ${targetPagesCount} pages (Speed: ${profile.icon} ${profile.name} [${profile.badge}])...`
     );
 
     // Initial check: ensure reader is actually loaded
@@ -288,13 +288,16 @@ export class ReaderAutomation {
         }
       }
 
-      // Base interval between 9.0s and 18.0s per page
-      const baseSeconds = uglyRandom(9.0, 18.0);
-      const delaySeconds = baseSeconds * (1 + sessionVariation / 100);
       const timeMultiplier = getTimeMultiplier();
-      const finalDelayMs = Math.round(delaySeconds * timeMultiplier * 1000);
+      const delayResult = calculatePageDelay(config.readingSpeed, timeMultiplier);
 
-      await sleep(finalDelayMs, signal);
+      if (delayResult.isMicroPause) {
+        logger.debug(
+          `[READER] Human micro-pause active (+${delayResult.extraPauseSeconds}s). Reading page for ${delayResult.delaySeconds}s...`
+        );
+      }
+
+      await sleep(delayResult.delayMs, signal);
 
       await this.turnPage(page, config);
       pagesRead++;
