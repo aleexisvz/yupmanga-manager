@@ -27,9 +27,9 @@ export class ActionScheduler {
 
     // 1. Fatigue adjustments for long reading sessions (70+ pages)
     if (context.pagesReadInCurrentSession >= 70) {
-      weights.short_break += 20;
-      weights.scroll_around += 15;
-      weights.read_pages = Math.max(25, weights.read_pages - 25);
+      weights.short_break += 15;
+      weights.scroll_around += 10;
+      weights.read_pages = Math.max(30, weights.read_pages - 20);
     }
 
     // 2. Reading session duration fatigue (> 60 minutes)
@@ -49,10 +49,15 @@ export class ActionScheduler {
       weights.visit_categories = 0;
     }
 
-    // 5. Avoid back-to-back breaks (< 8 minutes)
+    // 5. Strictly avoid back-to-back breaks (< 8 minutes since last break)
     if (now - context.lastBreakTimestamp < 8 * 60_000) {
-      weights.short_break = Math.max(2, weights.short_break - 15);
+      weights.short_break = 0;
       weights.long_break = 0;
+    }
+
+    // 6. Anti-repetition: never repeat the same non-reading action consecutively
+    if (context.lastAction && context.lastAction !== 'read_pages') {
+      weights[context.lastAction] = 0;
     }
 
     const actionType = this.weightedRandomChoice(weights);

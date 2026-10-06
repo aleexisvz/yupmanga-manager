@@ -29,10 +29,23 @@ export interface AntiDetectionConfig {
   removeWebdriverFlag: boolean;
 }
 
+export type ReadingSpeed = 'very_slow' | 'slow' | 'normal' | 'fast';
+
+export interface SpeedProfile {
+  id: ReadingSpeed;
+  name: string;
+  icon: string;
+  description: string;
+  minSeconds: number;
+  maxSeconds: number;
+  badge: string;
+}
+
 export interface AppConfig {
   runMode: RunMode;
-  intervalMs: number;
-  variationPercent: number;
+  readingSpeed: ReadingSpeed;
+  intervalMs?: number;
+  variationPercent?: number;
   mode: ReadingMode;
   clickSelector?: string;
   proxy?: string;

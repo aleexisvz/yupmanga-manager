@@ -82,6 +82,12 @@ export class BrowsingSimulator {
 
         await page.goBack().catch(() => {});
         await sleep(uglyRandom(1200, 2500));
+      } else {
+        // Fallback: If on series details/catalog with no external cards, scroll page to inspect current synopsis
+        await this.humanInput.smoothScroll(page, 'down', uglyRandom(300, 600));
+        await sleep(uglyRandom(2500, 4500));
+        await this.humanInput.smoothScroll(page, 'up', uglyRandom(200, 400));
+        await sleep(uglyRandom(1500, 2500));
       }
     } catch (error) {
       logger.debug({ error }, '[BROWSE] Error in browseManga');

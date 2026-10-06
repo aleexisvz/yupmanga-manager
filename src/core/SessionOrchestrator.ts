@@ -12,6 +12,7 @@ import { sleep, uglyRandom } from '../utils/delay.js';
 
 export class SessionOrchestrator {
   private isRunning = false;
+  private isStopping = false;
   private abortController: AbortController | null = null;
   private context: SessionContext = {
     pagesReadInCurrentSession: 0,
@@ -83,7 +84,18 @@ export class SessionOrchestrator {
         this.context.lastAction = action.type;
       }
     } catch (error: any) {
-      if (error?.message?.includes('aborted')) {
+      const isExpectedShutdown =
+        !this.isRunning ||
+        this.isStopping ||
+        this.abortController?.signal.aborted ||
+        error?.message?.includes('aborted') ||
+        error?.message?.includes('Sleep aborted') ||
+        error?.message?.includes('Target page, context or browser has been closed') ||
+        error?.message?.includes('Target closed') ||
+        error?.message?.includes('browser has been closed') ||
+        error?.name === 'TargetClosedError';
+
+      if (isExpectedShutdown) {
         logger.info('[SESSION] Session terminated gracefully.');
       } else {
         logger.error({ error }, '[SESSION] Unexpected error during orchestration');
@@ -144,7 +156,23 @@ export class SessionOrchestrator {
             }
             activeReaderPage = opened.readerPage;
             await sleep(uglyRandom(2000, 4000));
+          } else {
+            logger.warn(`[READER] Not on catalog page for "${currentManga.title}". Navigating to catalog...`);
+            await page.goto(currentManga.url, { waitUntil: 'domcontentloaded' });
+            await sleep(uglyRandom(2000, 3500));
+            break;
           }
+        }
+
+        // Verify reader is actually open before reading
+        const inReader =
+          activeReaderPage.url().includes('box-modal') ||
+          activeReaderPage.url().includes('interstitial') ||
+          (await this.reader.isReaderPage(activeReaderPage));
+
+        if (!inReader) {
+          logger.warn(`[READER] Reader not open for "${currentManga.title}". Retrying next cycle...`);
+          break;
         }
 
         // Execute reading block on the active reader page
@@ -173,25 +201,30 @@ export class SessionOrchestrator {
       }
 
       case 'visit_home':
+        await this.closeAnyOpenReader(page);
         await this.browsing.visitHome(page);
         this.context.lastAction = 'visit_home';
         break;
 
       case 'visit_profile':
+        await this.closeAnyOpenReader(page);
         await this.browsing.visitProfile(page);
         this.context.lastProfileVisitTimestamp = Date.now();
         break;
 
       case 'visit_categories':
+        await this.closeAnyOpenReader(page);
         await this.browsing.visitCategories(page);
         this.context.lastCategoryVisitTimestamp = Date.now();
         break;
 
       case 'browse_manga':
+        await this.closeAnyOpenReader(page);
         await this.browsing.browseManga(page);
         break;
 
       case 'scroll_around':
+        await this.closeAnyOpenReader(page);
         await this.browsing.scrollAround(page);
         break;
 
@@ -201,9 +234,47 @@ export class SessionOrchestrator {
         break;
 
       case 'long_break':
+        await this.closeAnyOpenReader(page);
         await this.browsing.takeLongBreak(page, this.config, signal);
         this.context.lastBreakTimestamp = Date.now();
         break;
+    }
+  }
+
+  private async closeAnyOpenReader(page: Page): Promise<void> {
+    try {
+      if (page.isClosed()) return;
+
+      const contextPages = page.context().pages();
+      for (const p of contextPages) {
+        if (
+          !p.isClosed() &&
+          (p.url().includes('box-modal') ||
+            p.url().includes('chapter') ||
+            p.url().includes('reader') ||
+            (await this.reader.isReaderPage(p)))
+        ) {
+          logger.info('[READER] Closing open reader to return to catalog for browsing...');
+          await this.reader.closeReader(p);
+
+          // If it was a popup window separate from the main page, close it if still open
+          if (p !== page && !p.isClosed()) {
+            await p.close().catch(() => {});
+          }
+        }
+      }
+
+      // If the main page was used as the reader and close button failed to navigate away:
+      if (!page.isClosed() && (await this.reader.isReaderPage(page))) {
+        logger.info('[READER] Navigating main page back from reader to catalog...');
+        await page.goBack().catch(() => {});
+      }
+
+      if (!page.isClosed()) {
+        await page.bringToFront().catch(() => {});
+      }
+    } catch (err) {
+      logger.debug({ err }, '[READER] Error while ensuring reader closed');
     }
   }
 
@@ -224,10 +295,16 @@ export class SessionOrchestrator {
     }
 
     const currentUrl = page.url();
-    const normalize = (u: string) => u.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
-    const isMangaUrl =
-      normalize(currentUrl).includes(normalize(manga.url)) ||
-      normalize(manga.url).includes(normalize(currentUrl));
+    let isMangaUrl = false;
+    try {
+      const current = new URL(currentUrl);
+      const target = new URL(manga.url.startsWith('http') ? manga.url : `https://${manga.url}`);
+      const currentPath = current.pathname.replace(/\/$/, '').toLowerCase();
+      const targetPath = target.pathname.replace(/\/$/, '').toLowerCase();
+      isMangaUrl = current.origin === target.origin && currentPath === targetPath;
+    } catch {
+      isMangaUrl = false;
+    }
 
     if (!isMangaUrl) {
       logger.info(`[NAV] Navigating to manga catalog: ${manga.title}...`);
@@ -237,6 +314,8 @@ export class SessionOrchestrator {
   }
 
   async stop(): Promise<void> {
+    if (this.isStopping) return;
+    this.isStopping = true;
     this.isRunning = false;
     this.abortController?.abort();
     await this.browser.close();

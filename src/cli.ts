@@ -11,6 +11,8 @@ import { MangaQueue } from './queue/MangaQueue.js';
 import { ProgressTracker } from './storage/ProgressTracker.js';
 import { SessionOrchestrator } from './core/SessionOrchestrator.js';
 import { ConfigLoader } from './config/loader.js';
+import { SPEED_PROFILES } from './config/defaults.js';
+import type { ReadingSpeed } from './config/types.js';
 import { setupGracefulShutdown } from './utils/signals.js';
 import { logger } from './logger.js';
 
@@ -43,6 +45,37 @@ program
   .description('Start the autonomous reading session in background')
   .action(async () => {
     await startSession();
+  });
+
+program
+  .command('speed')
+  .description('View or set reading speed preset (fast, normal, slow, very_slow)')
+  .argument('[preset]', 'Speed preset: fast | normal | slow | very_slow')
+  .action(async (preset?: string) => {
+    const config = await ConfigLoader.load();
+    if (!preset) {
+      const current = SPEED_PROFILES[config.readingSpeed || 'normal'];
+      console.log(chalk.cyan(`\nCurrent reading speed: ${current.icon} ${current.name} (${current.badge})`));
+      console.log(chalk.gray(`Description: ${current.description}\n`));
+      console.log('Available presets:');
+      (Object.keys(SPEED_PROFILES) as ReadingSpeed[]).forEach((key) => {
+        const p = SPEED_PROFILES[key];
+        console.log(`  - ${chalk.bold(p.id)}: ${p.icon} ${p.name} (${p.badge}) - ${p.description}`);
+      });
+      console.log('');
+      process.exit(0);
+    }
+
+    if (preset in SPEED_PROFILES) {
+      config.readingSpeed = preset as ReadingSpeed;
+      await ConfigLoader.save(config);
+      const profile = SPEED_PROFILES[preset as ReadingSpeed];
+      console.log(chalk.green(`\n✓ Reading speed set to: ${profile.icon} ${profile.name} (${profile.badge})\n`));
+      process.exit(0);
+    } else {
+      console.log(chalk.red(`\nInvalid preset "${preset}". Choose from: fast, normal, slow, very_slow\n`));
+      process.exit(1);
+    }
   });
 
 async function checkAccountStatus(): Promise<void> {
@@ -131,7 +164,7 @@ async function showInteractiveMenu(): Promise<void> {
         { name: '4. Add manga to queue', value: 'add_manga' },
         { name: '5. Remove manga from queue', value: 'remove_manga' },
         { name: '6. View statistics & progress', value: 'stats' },
-        { name: '7. Settings (runMode, intervals)', value: 'config' },
+        { name: '7. Settings (reading speed, runMode)', value: 'config' },
         { name: '8. Initial Setup (Manual login / Cloudflare)', value: 'setup' },
         { name: '9. Exit', value: 'exit' },
       ],
@@ -209,19 +242,70 @@ async function showInteractiveMenu(): Promise<void> {
       }
 
       case 'config': {
-        const newRunMode = await select({
-          message: 'Browser execution mode:',
+        const currentSpeed = config.readingSpeed || 'normal';
+        const currentProfile = SPEED_PROFILES[currentSpeed] || SPEED_PROFILES.normal;
+
+        const subChoice = await select({
+          message: 'Select setting to configure:',
           choices: [
-            { name: 'Headless (invisible in background)', value: 'headless' },
-            { name: 'Off-screen (real headed window off-monitor)', value: 'offscreen' },
-            { name: 'Headed (visible window)', value: 'headed' },
+            {
+              name: `Reading Speed [Current: ${currentProfile.icon} ${currentProfile.name} (${currentProfile.badge})]`,
+              value: 'speed',
+            },
+            {
+              name: `Browser Mode [Current: ${config.runMode}]`,
+              value: 'runMode',
+            },
+            { name: 'Back to main menu', value: 'back' },
           ],
-          default: config.runMode,
         });
 
-        config.runMode = newRunMode as any;
-        await ConfigLoader.save(config);
-        console.log(chalk.green('\nConfiguration saved successfully.\n'));
+        if (subChoice === 'speed') {
+          const newSpeed = await select<ReadingSpeed>({
+            message: 'Select page reading speed preset:',
+            choices: [
+              {
+                name: `${SPEED_PROFILES.fast.icon} ${SPEED_PROFILES.fast.name} (${SPEED_PROFILES.fast.badge}) - ${SPEED_PROFILES.fast.description}`,
+                value: 'fast',
+              },
+              {
+                name: `${SPEED_PROFILES.normal.icon} ${SPEED_PROFILES.normal.name} (${SPEED_PROFILES.normal.badge}) - ${SPEED_PROFILES.normal.description}`,
+                value: 'normal',
+              },
+              {
+                name: `${SPEED_PROFILES.slow.icon} ${SPEED_PROFILES.slow.name} (${SPEED_PROFILES.slow.badge}) - ${SPEED_PROFILES.slow.description}`,
+                value: 'slow',
+              },
+              {
+                name: `${SPEED_PROFILES.very_slow.icon} ${SPEED_PROFILES.very_slow.name} (${SPEED_PROFILES.very_slow.badge}) - ${SPEED_PROFILES.very_slow.description}`,
+                value: 'very_slow',
+              },
+            ],
+            default: currentSpeed,
+          });
+
+          config.readingSpeed = newSpeed;
+          await ConfigLoader.save(config);
+          console.log(
+            chalk.green(
+              `\n✓ Reading speed set to: ${SPEED_PROFILES[newSpeed].icon} ${SPEED_PROFILES[newSpeed].name} (${SPEED_PROFILES[newSpeed].badge})\n`
+            )
+          );
+        } else if (subChoice === 'runMode') {
+          const newRunMode = await select({
+            message: 'Browser execution mode:',
+            choices: [
+              { name: 'Headless (invisible in background)', value: 'headless' },
+              { name: 'Off-screen (real headed window off-monitor)', value: 'offscreen' },
+              { name: 'Headed (visible window)', value: 'headed' },
+            ],
+            default: config.runMode,
+          });
+
+          config.runMode = newRunMode as any;
+          await ConfigLoader.save(config);
+          console.log(chalk.green('\n✓ Browser execution mode updated.\n'));
+        }
         break;
       }
 

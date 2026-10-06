@@ -13,6 +13,7 @@ describe('Configuration & Data Schemas', () => {
       const config = AppConfigSchema.parse({});
 
       expect(config.runMode).toBe('headless');
+      expect(config.readingSpeed).toBe('normal');
       expect(config.intervalMs).toBe(15_000);
       expect(config.variationPercent).toBe(45);
       expect(config.mode).toBe('keyboard');
@@ -23,10 +24,12 @@ describe('Configuration & Data Schemas', () => {
     it('should correctly override specific fields while maintaining defaults for omitted fields', () => {
       const config = AppConfigSchema.parse({
         runMode: 'headed',
+        readingSpeed: 'fast',
         intervalMs: 8_000,
       });
 
       expect(config.runMode).toBe('headed');
+      expect(config.readingSpeed).toBe('fast');
       expect(config.intervalMs).toBe(8_000);
       expect(config.variationPercent).toBe(45);
     });
@@ -35,6 +38,12 @@ describe('Configuration & Data Schemas', () => {
       expect(() =>
         AppConfigSchema.parse({
           intervalMs: -100,
+        })
+      ).toThrow();
+
+      expect(() =>
+        AppConfigSchema.parse({
+          readingSpeed: 'super_fast' as any,
         })
       ).toThrow();
     });
