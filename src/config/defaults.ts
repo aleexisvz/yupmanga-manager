@@ -1,6 +1,6 @@
 import path from 'node:path';
 import os from 'node:os';
-import type { AppConfig } from './types.js';
+import type { AppConfig, ReadingSpeed, SpeedProfile } from './types.js';
 
 export const USER_DATA_DIR = path.join(os.homedir(), '.yupmanga', 'browser-data');
 export const CONFIG_FILE_PATH = path.join(os.homedir(), '.yupmanga', 'config.json');
@@ -9,6 +9,45 @@ export const PROGRESS_FILE_PATH = path.join(os.homedir(), '.yupmanga', 'progress
 export const LOGS_DIR = path.join(os.homedir(), '.yupmanga', 'logs');
 
 export const BASE_URL = 'https://www.yupmanga.com';
+
+export const SPEED_PROFILES: Record<ReadingSpeed, SpeedProfile> = {
+  fast: {
+    id: 'fast',
+    name: 'Rápido',
+    icon: '⚡',
+    description: 'Escaneo veloz y hojear páginas',
+    minSeconds: 3,
+    maxSeconds: 6,
+    badge: '~3-6 seg',
+  },
+  normal: {
+    id: 'normal',
+    name: 'Normal',
+    icon: '📖',
+    description: 'Ritmo estándar y dinámico de lectura',
+    minSeconds: 7,
+    maxSeconds: 12,
+    badge: '~7-12 seg',
+  },
+  slow: {
+    id: 'slow',
+    name: 'Lento',
+    icon: '☕',
+    description: 'Lectura tranquila y detallada',
+    minSeconds: 12,
+    maxSeconds: 20,
+    badge: '~12-20 seg',
+  },
+  very_slow: {
+    id: 'very_slow',
+    name: 'Muy Lento',
+    icon: '🐢',
+    description: 'Pausado / Máxima discreción',
+    minSeconds: 20,
+    maxSeconds: 35,
+    badge: '~20-35 seg',
+  },
+};
 
 export const SELECTORS = {
   // Gallery and volumes
@@ -24,7 +63,7 @@ export const SELECTORS = {
   AD_MESSAGE_TEXT: 'text="Un momento y podrás seguir leyendo"',
   AD_COUNTDOWN_TEXT: 'text=/Espera \\d+ segundos/i',
   AD_CONTINUE_BUTTON:
-    '#continueBtn, #continueBtnMobileTop, .continue-button, #btn-continue, #btn-continue button, button:has-text("Continuar al capítulo"), a:has-text("Continuar al capítulo"), button:has-text("Continuar")',
+    '#continueBtn, #continueBtnMobileTop, .continue-button, #btn-continue, #btn-continue button, button:has-text("Continuar al capítulo"), a:has-text("Continuar al capítulo")',
 
   // Reader interface
   READER_PAGE_INFO: 'text=/Página\\s+\\d+\\s+de\\s+\\d+/i',
@@ -50,8 +89,9 @@ export const SELECTORS = {
 
 export const DEFAULT_CONFIG: AppConfig = {
   runMode: 'headless',
-  intervalMs: 15_000,          // 15 segundos base por página
-  variationPercent: 45,        // Variación base (se vuelve dinámica por sesión entre 30% y 60%)
+  readingSpeed: 'normal',
+  intervalMs: 15_000,          // 15 segundos base por página (legacy fallback)
+  variationPercent: 45,        // Variación base (legacy fallback)
   mode: 'keyboard',
   proxy: undefined,
   behavior: {

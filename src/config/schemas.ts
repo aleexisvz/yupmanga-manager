@@ -3,6 +3,7 @@ import { DEFAULT_CONFIG } from './defaults.js';
 
 export const RunModeSchema = z.enum(['headless', 'offscreen', 'headed']);
 export const ReadingModeSchema = z.enum(['keyboard', 'click']);
+export const ReadingSpeedSchema = z.enum(['very_slow', 'slow', 'normal', 'fast']);
 
 export const ActionTypeSchema = z.enum([
   'read_pages',
@@ -36,8 +37,9 @@ export const AntiDetectionConfigSchema = z.object({
 
 export const AppConfigSchema = z.object({
   runMode: RunModeSchema.default(DEFAULT_CONFIG.runMode),
-  intervalMs: z.number().positive().default(DEFAULT_CONFIG.intervalMs),
-  variationPercent: z.number().min(0).max(100).default(DEFAULT_CONFIG.variationPercent),
+  readingSpeed: ReadingSpeedSchema.default(DEFAULT_CONFIG.readingSpeed),
+  intervalMs: z.number().positive().default(DEFAULT_CONFIG.intervalMs ?? 15_000),
+  variationPercent: z.number().min(0).max(100).default(DEFAULT_CONFIG.variationPercent ?? 45),
   mode: ReadingModeSchema.default(DEFAULT_CONFIG.mode),
   clickSelector: z.string().optional(),
   proxy: z.string().optional(),
