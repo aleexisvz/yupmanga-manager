@@ -14,6 +14,7 @@ describe('Configuration & Data Schemas', () => {
 
       expect(config.runMode).toBe('headless');
       expect(config.readingSpeed).toBe('normal');
+      expect(config.readingDirection).toBe('auto');
       expect(config.intervalMs).toBe(15_000);
       expect(config.variationPercent).toBe(45);
       expect(config.mode).toBe('keyboard');

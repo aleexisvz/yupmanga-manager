@@ -68,7 +68,10 @@ export const SELECTORS = {
   // Reader interface
   READER_PAGE_INFO: 'text=/Página\\s+\\d+\\s+de\\s+\\d+/i',
   READER_CLOSE_BUTTON: 'button:has-text("Cerrar")',
-  READER_NEXT_BUTTON: 'button[aria-label="Next"], .reader-next, button:has-text(">")',
+  READER_NEXT_BUTTON:
+    'button[aria-label="Next"], button[aria-label="Siguiente"], button[aria-label*="next" i], button[aria-label*="siguiente" i], .reader-next, .btn-next, [data-action="next"], button:has-text(">"), button:has-text("›"), button:has-text("»")',
+  READER_PREV_BUTTON:
+    'button[aria-label="Prev"], button[aria-label="Anterior"], button[aria-label*="prev" i], button[aria-label*="anterior" i], .reader-prev, .btn-prev, [data-action="prev"], button:has-text("<"), button:has-text("‹"), button:has-text("«")',
   READER_READY_INDICATORS: 'button:has-text("Cerrar"), text=/Página\\s+\\d+\\s+de\\s+\\d+/i',
 
   // Site navigation
@@ -90,6 +93,7 @@ export const SELECTORS = {
 export const DEFAULT_CONFIG: AppConfig = {
   runMode: 'headless',
   readingSpeed: 'normal',
+  readingDirection: 'auto',
   intervalMs: 15_000,          // 15 segundos base por página (legacy fallback)
   variationPercent: 45,        // Variación base (legacy fallback)
   mode: 'keyboard',

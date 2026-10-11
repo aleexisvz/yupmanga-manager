@@ -145,8 +145,29 @@ export class ReaderAutomation {
   }
 
   async isReaderPage(page: Page): Promise<boolean> {
-    const info = await this.getPageInfo(page);
-    return info !== null;
+    try {
+      if (page.isClosed()) return false;
+      const url = page.url();
+      if (url.includes('box-modal') || url.includes('chapter') || url.includes('lector') || url.includes('interstitial')) {
+        return true;
+      }
+
+      // Close button is unique to the reader modal
+      const hasCloseBtn = (await page.locator(SELECTORS.READER_CLOSE_BUTTON).count()) > 0;
+      if (hasCloseBtn) {
+        return true;
+      }
+
+      // If on series catalog and no close button, it is the catalog, not the reader
+      if (url.includes('series.php') || url.includes('/series/') || url.includes('/manga/')) {
+        return false;
+      }
+
+      const info = await this.getPageInfo(page);
+      return info !== null;
+    } catch {
+      return false;
+    }
   }
 
   async isLastPage(page: Page): Promise<boolean> {
@@ -155,16 +176,172 @@ export class ReaderAutomation {
     return info.currentPage >= info.totalPages;
   }
 
-  async turnPage(page: Page, config: AppConfig): Promise<void> {
+  /**
+   * Detects reading direction hints from DOM attributes or text
+   */
+  async detectDomReadingDirection(page: Page): Promise<'rtl' | 'ltr' | null> {
+    try {
+      return await page.evaluate(() => {
+        const bodyText = (document.body.innerText || '').toLowerCase();
+        const html = document.documentElement;
+        if (html.getAttribute('dir') === 'rtl') return 'rtl';
+
+        if (document.querySelector('[data-reading-direction="rtl"], [data-mode*="rtl"], .reading-mode-rtl')) {
+          return 'rtl';
+        }
+        if (document.querySelector('[data-reading-direction="ltr"], [data-mode*="ltr"], .reading-mode-ltr')) {
+          return 'ltr';
+        }
+
+        if (bodyText.includes('derecha a izquierda') || bodyText.includes('manga (rtl)')) {
+          return 'rtl';
+        }
+        if (
+          bodyText.includes('izquierda a derecha') ||
+          bodyText.includes('webtoon') ||
+          bodyText.includes('cascada') ||
+          bodyText.includes('occidental (ltr)')
+        ) {
+          return 'ltr';
+        }
+
+        return null;
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Advances the reader forward by one page with verification,
+   * bidirectional auto-recovery, and reading direction self-calibration.
+   */
+  async turnPageForward(
+    page: Page,
+    config: AppConfig,
+    currentDirection: 'rtl' | 'ltr'
+  ): Promise<{ advanced: boolean; newPage: number; detectedDirection: 'rtl' | 'ltr' }> {
+    const beforeInfo = await this.getPageInfo(page);
+    if (!beforeInfo) {
+      return { advanced: false, newPage: 1, detectedDirection: currentDirection };
+    }
+
+    const forwardKey = currentDirection === 'rtl' ? 'ArrowLeft' : 'ArrowRight';
+    const reverseKey = currentDirection === 'rtl' ? 'ArrowRight' : 'ArrowLeft';
+
+    // 1. Ensure reader window and body have active focus
+    await page.evaluate(() => {
+      window.focus();
+      document.body?.focus();
+    }).catch(() => {});
+
+    // 2. Custom clickSelector support if in click mode
+    if (config.mode === 'click' && config.clickSelector) {
+      const btn = page.locator(config.clickSelector).first();
+      if (await btn.isVisible().catch(() => false)) {
+        await btn.click().catch(() => {});
+        await sleep(600);
+        const afterInfo = await this.getPageInfo(page);
+        if (afterInfo && afterInfo.currentPage > beforeInfo.currentPage) {
+          return { advanced: true, newPage: afterInfo.currentPage, detectedDirection: currentDirection };
+        }
+      }
+    }
+
+    // 3. Press candidate forward key
+    await page.keyboard.press(forwardKey);
+    await sleep(600);
+
+    let afterInfo = await this.getPageInfo(page);
+    if (!afterInfo) {
+      return { advanced: false, newPage: beforeInfo.currentPage, detectedDirection: currentDirection };
+    }
+
+    // Case A: Page advanced forward
+    if (afterInfo.currentPage > beforeInfo.currentPage) {
+      return { advanced: true, newPage: afterInfo.currentPage, detectedDirection: currentDirection };
+    }
+
+    // Case B: Page moved backwards! Direction was inverted!
+    if (afterInfo.currentPage < beforeInfo.currentPage) {
+      const newDirection: 'rtl' | 'ltr' = currentDirection === 'rtl' ? 'ltr' : 'rtl';
+      logger.warn(
+        `[READER] Page moved backward (${beforeInfo.currentPage} -> ${afterInfo.currentPage}) using [${forwardKey}]. Auto-calibrating orientation to [${newDirection.toUpperCase()}] (Key: ${reverseKey})...`
+      );
+
+      // Press the opposite key to recover lost page and advance forward
+      await page.keyboard.press(reverseKey);
+      await sleep(350);
+      await page.keyboard.press(reverseKey);
+      await sleep(600);
+
+      afterInfo = await this.getPageInfo(page);
+      if (afterInfo && afterInfo.currentPage > beforeInfo.currentPage) {
+        return { advanced: true, newPage: afterInfo.currentPage, detectedDirection: newDirection };
+      }
+      return {
+        advanced: false,
+        newPage: afterInfo?.currentPage ?? beforeInfo.currentPage,
+        detectedDirection: newDirection,
+      };
+    }
+
+    // Case C: Page did not move (e.g., stuck on Page 1 because forwardKey was actually previous key)
+    logger.debug(`[READER] Page did not advance with [${forwardKey}]. Testing opposite key [${reverseKey}]...`);
+    await page.keyboard.press(reverseKey);
+    await sleep(600);
+
+    afterInfo = await this.getPageInfo(page);
+    if (afterInfo && afterInfo.currentPage > beforeInfo.currentPage) {
+      const newDirection: 'rtl' | 'ltr' = currentDirection === 'rtl' ? 'ltr' : 'rtl';
+      logger.info(
+        `[READER] Calibrated reading direction: [${newDirection.toUpperCase()}] (Advanced to Page ${afterInfo.currentPage} via ${reverseKey}).`
+      );
+      return { advanced: true, newPage: afterInfo.currentPage, detectedDirection: newDirection };
+    }
+
+    // Case D: Try visible Next button in reader interface
+    const nextBtn = page.locator(SELECTORS.READER_NEXT_BUTTON).first();
+    if (await nextBtn.isVisible().catch(() => false)) {
+      logger.debug('[READER] Trying navigation via next button selector...');
+      await nextBtn.click({ force: true }).catch(() => {});
+      await sleep(600);
+      afterInfo = await this.getPageInfo(page);
+      if (afterInfo && afterInfo.currentPage > beforeInfo.currentPage) {
+        return { advanced: true, newPage: afterInfo.currentPage, detectedDirection: currentDirection };
+      }
+    }
+
+    // Case E: Viewport tap on the forward side of the reader
+    try {
+      const viewport = page.viewportSize() || { width: 1280, height: 850 };
+      const clickX = currentDirection === 'rtl' ? Math.round(viewport.width * 0.15) : Math.round(viewport.width * 0.85);
+      const clickY = Math.round(viewport.height * 0.5);
+      await page.mouse.click(clickX, clickY);
+      await sleep(600);
+      afterInfo = await this.getPageInfo(page);
+      if (afterInfo && afterInfo.currentPage > beforeInfo.currentPage) {
+        return { advanced: true, newPage: afterInfo.currentPage, detectedDirection: currentDirection };
+      }
+    } catch {}
+
+    return { advanced: false, newPage: beforeInfo.currentPage, detectedDirection: currentDirection };
+  }
+
+  /**
+   * Backward-compatible simple turn page
+   */
+  async turnPage(page: Page, config: AppConfig, direction: 'rtl' | 'ltr' = 'rtl'): Promise<void> {
     if (config.mode === 'click' && config.clickSelector) {
       const btn = page.locator(config.clickSelector);
-      if (await btn.isVisible()) {
-        await btn.click();
+      if (await btn.isVisible().catch(() => false)) {
+        await btn.click().catch(() => {});
         return;
       }
     }
 
-    await page.keyboard.press('ArrowRight');
+    const key = direction === 'rtl' ? 'ArrowLeft' : 'ArrowRight';
+    await page.keyboard.press(key);
   }
 
   async closeReader(page: Page): Promise<boolean> {
@@ -266,26 +443,43 @@ export class ReaderAutomation {
     lastInfo = initialInfo;
     logger.info(`[READER] Reader active: Page ${initialInfo.currentPage} of ${initialInfo.totalPages}`);
 
+    // Resolve initial reading direction (default to RTL for manga, which maps forward to ArrowLeft)
+    let activeDirection: 'rtl' | 'ltr' =
+      config.readingDirection === 'rtl'
+        ? 'rtl'
+        : config.readingDirection === 'ltr'
+          ? 'ltr'
+          : (await this.detectDomReadingDirection(page)) || 'rtl';
+
+    logger.info(`[READER] Initial reading orientation: [${activeDirection.toUpperCase()}]`);
+
+    let consecutiveStuckCount = 0;
+    const MAX_STUCK_RETRIES = 4;
+
     while (pagesRead < targetPagesCount) {
       if (signal?.aborted) break;
 
       const info = await this.getPageInfo(page);
-      if (info) {
-        lastInfo = info;
+      if (!info) {
+        logger.warn('[READER] Lost reader page info. Re-checking...');
+        await sleep(1500, signal);
+        continue;
+      }
 
-        // Periodic feedback: log on first page, every 5 pages, or final page
-        if (pagesRead === 0 || pagesRead % 5 === 0 || info.currentPage >= info.totalPages) {
-          logger.info(
-            `[READER] Progress: Page ${info.currentPage} of ${info.totalPages} (Session: ${pagesRead}/${targetPagesCount} pages)`
-          );
-        }
+      lastInfo = info;
 
-        if (info.currentPage >= info.totalPages) {
-          logger.info('[READER] Final page of volume reached!');
-          volumeCompleted = true;
-          await this.closeReader(page);
-          break;
-        }
+      if (info.currentPage >= info.totalPages) {
+        logger.info('[READER] Final page of volume reached!');
+        volumeCompleted = true;
+        await this.closeReader(page);
+        break;
+      }
+
+      // Periodic feedback: log on first page, every 5 pages, or final page
+      if (pagesRead === 0 || pagesRead % 5 === 0) {
+        logger.info(
+          `[READER] Progress: Page ${info.currentPage} of ${info.totalPages} (Session: ${pagesRead}/${targetPagesCount} pages)`
+        );
       }
 
       const timeMultiplier = getTimeMultiplier();
@@ -298,9 +492,40 @@ export class ReaderAutomation {
       }
 
       await sleep(delayResult.delayMs, signal);
+      if (signal?.aborted) break;
 
-      await this.turnPage(page, config);
-      pagesRead++;
+      const turnResult = await this.turnPageForward(page, config, activeDirection);
+      activeDirection = turnResult.detectedDirection;
+
+      if (turnResult.advanced && turnResult.newPage > info.currentPage) {
+        pagesRead++;
+        consecutiveStuckCount = 0;
+        lastInfo = { ...info, currentPage: turnResult.newPage };
+
+        if (turnResult.newPage >= info.totalPages) {
+          logger.info(
+            `[READER] Progress: Page ${turnResult.newPage} of ${info.totalPages} (Session: ${pagesRead}/${targetPagesCount} pages)`
+          );
+          logger.info('[READER] Final page of volume reached!');
+          volumeCompleted = true;
+          await this.closeReader(page);
+          break;
+        }
+      } else {
+        consecutiveStuckCount++;
+        logger.warn(
+          `[READER] Page did not advance from Page ${info.currentPage} of ${info.totalPages} (Attempt ${consecutiveStuckCount}/${MAX_STUCK_RETRIES}).`
+        );
+
+        if (consecutiveStuckCount >= MAX_STUCK_RETRIES) {
+          logger.error(
+            `[READER] Reader cannot advance from Page ${info.currentPage}. Halting reading session safely to avoid desync.`
+          );
+          break;
+        }
+
+        await sleep(1500, signal);
+      }
     }
 
     logger.info(`[READER] Finished reading block: ${pagesRead} pages read in this block.`);

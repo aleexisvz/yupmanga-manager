@@ -12,10 +12,19 @@ export interface OpenedVolumeResult {
 export class GalleryNavigator {
   async isGalleryPage(page: Page): Promise<boolean> {
     try {
+      if (page.isClosed()) return false;
+
+      // If reader close button is present, the page is inside the reader modal
+      const hasCloseBtn = (await page.locator(SELECTORS.READER_CLOSE_BUTTON).count()) > 0;
+      if (hasCloseBtn) return false;
+
       const url = page.url();
+      if (url.includes('box-modal') || url.includes('chapter') || url.includes('lector')) {
+        return false;
+      }
+
       if (url.includes('series.php') || url.includes('/series/') || url.includes('/manga/')) {
-        const pageIndicator = await page.locator(SELECTORS.READER_PAGE_INFO).count();
-        if (pageIndicator === 0) return true;
+        return true;
       }
 
       const chapterCount = await page.locator(SELECTORS.CHAPTER_LINK).count();
