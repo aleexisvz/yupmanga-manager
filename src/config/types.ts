@@ -41,9 +41,12 @@ export interface SpeedProfile {
   badge: string;
 }
 
+export type ReadingDirection = 'auto' | 'rtl' | 'ltr';
+
 export interface AppConfig {
   runMode: RunMode;
   readingSpeed: ReadingSpeed;
+  readingDirection?: ReadingDirection;
   intervalMs?: number;
   variationPercent?: number;
   mode: ReadingMode;

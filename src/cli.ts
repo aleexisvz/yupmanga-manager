@@ -78,6 +78,32 @@ program
     }
   });
 
+program
+  .command('direction')
+  .description('View or set reading direction (auto, rtl, ltr)')
+  .argument('[dir]', 'Reading direction: auto | rtl | ltr')
+  .action(async (dir?: string) => {
+    const config = await ConfigLoader.load();
+    if (!dir) {
+      console.log(chalk.cyan(`\nCurrent reading direction: ${config.readingDirection || 'auto'}\n`));
+      console.log('Available options:');
+      console.log('  - auto: Auto-detect & self-calibrating (recommended)');
+      console.log('  - rtl: Right-to-Left (Japanese manga, ArrowLeft = next)');
+      console.log('  - ltr: Left-to-Right (Manhwa/western, ArrowRight = next)\n');
+      process.exit(0);
+    }
+    const clean = dir.toLowerCase();
+    if (['auto', 'rtl', 'ltr'].includes(clean)) {
+      config.readingDirection = clean as any;
+      await ConfigLoader.save(config);
+      console.log(chalk.green(`\n✓ Reading direction set to: ${clean}\n`));
+      process.exit(0);
+    } else {
+      console.log(chalk.red(`\nInvalid direction "${dir}". Choose from: auto, rtl, ltr\n`));
+      process.exit(1);
+    }
+  });
+
 async function checkAccountStatus(): Promise<void> {
   const config = await ConfigLoader.load();
   const browser = new BrowserManager();
@@ -253,6 +279,10 @@ async function showInteractiveMenu(): Promise<void> {
               value: 'speed',
             },
             {
+              name: `Reading Direction [Current: ${config.readingDirection || 'auto'}]`,
+              value: 'direction',
+            },
+            {
               name: `Browser Mode [Current: ${config.runMode}]`,
               value: 'runMode',
             },
@@ -291,6 +321,20 @@ async function showInteractiveMenu(): Promise<void> {
               `\n✓ Reading speed set to: ${SPEED_PROFILES[newSpeed].icon} ${SPEED_PROFILES[newSpeed].name} (${SPEED_PROFILES[newSpeed].badge})\n`
             )
           );
+        } else if (subChoice === 'direction') {
+          const newDirection = await select({
+            message: 'Reading direction (how pages turn):',
+            choices: [
+              { name: 'Auto-detect (Adaptive RTL/LTR with self-calibration) [Recommended]', value: 'auto' },
+              { name: 'Manga RTL (Right-to-Left: ArrowLeft = next, standard for Japanese manga)', value: 'rtl' },
+              { name: 'Comic/Manhwa LTR (Left-to-Right: ArrowRight = next)', value: 'ltr' },
+            ],
+            default: config.readingDirection || 'auto',
+          });
+
+          config.readingDirection = newDirection as any;
+          await ConfigLoader.save(config);
+          console.log(chalk.green(`\n✓ Reading direction set to: ${newDirection}\n`));
         } else if (subChoice === 'runMode') {
           const newRunMode = await select({
             message: 'Browser execution mode:',
