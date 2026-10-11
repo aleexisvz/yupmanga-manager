@@ -7,6 +7,7 @@ import { ActionScheduler, type SessionContext } from '../behavior/ActionSchedule
 import { MangaQueue } from '../queue/MangaQueue.js';
 import { ProgressTracker } from '../storage/ProgressTracker.js';
 import type { AppConfig, MangaEntry } from '../config/types.js';
+import { SELECTORS } from '../config/defaults.js';
 import { logger } from '../logger.js';
 import { sleep, uglyRandom } from '../utils/delay.js';
 
@@ -138,10 +139,14 @@ export class SessionOrchestrator {
 
         if (existingModal) {
           activeReaderPage = existingModal;
+        } else if (await this.reader.isReaderPage(page)) {
+          // The main page is already active inside the reader: continue reading directly
+          activeReaderPage = page;
         } else {
           // Check if on gallery page, if so open next volume
           const isGallery = await this.gallery.isGalleryPage(page);
           if (isGallery) {
+            await page.waitForSelector(SELECTORS.CHAPTER_LINK, { timeout: 6000 }).catch(() => {});
             const opened = await this.gallery.openNextVolume(page);
             if (!opened) {
               const hasNextPage = await this.gallery.hasNextGalleryPage(page);
@@ -302,6 +307,13 @@ export class SessionOrchestrator {
       const currentPath = current.pathname.replace(/\/$/, '').toLowerCase();
       const targetPath = target.pathname.replace(/\/$/, '').toLowerCase();
       isMangaUrl = current.origin === target.origin && currentPath === targetPath;
+
+      // Also check query param ID or slug matching (e.g. ?id=WRD73EIF9XJBY or /series/WRD73EIF9XJBY)
+      const targetIdMatch = manga.url.match(/id=([^&]+)/i) || manga.url.match(/(?:series|manga)\/([^/?#]+)/i);
+      const targetId = targetIdMatch?.[1]?.toLowerCase();
+      if (targetId && currentUrl.toLowerCase().includes(targetId)) {
+        isMangaUrl = true;
+      }
     } catch {
       isMangaUrl = false;
     }
