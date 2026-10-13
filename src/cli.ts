@@ -159,11 +159,15 @@ async function startSession(): Promise<void> {
     config
   );
 
-  setupGracefulShutdown(async () => {
+  const teardownSignals = setupGracefulShutdown(async () => {
     await orchestrator.stop();
   });
 
-  await orchestrator.start();
+  try {
+    await orchestrator.start();
+  } finally {
+    teardownSignals();
+  }
 }
 
 async function showInteractiveMenu(): Promise<void> {
@@ -199,7 +203,7 @@ async function showInteractiveMenu(): Promise<void> {
     switch (choice) {
       case 'start':
         await startSession();
-        return;
+        break;
 
       case 'check_auth':
         await checkAccountStatus();
