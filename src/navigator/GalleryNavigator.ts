@@ -9,6 +9,12 @@ export interface OpenedVolumeResult {
   readerPage: Page;
 }
 
+export interface SeriesCompletionResult {
+  isComplete: boolean;
+  totalVolumes: number;
+  completedCount: number;
+}
+
 export class GalleryNavigator {
   async isGalleryPage(page: Page): Promise<boolean> {
     try {
@@ -209,5 +215,32 @@ export class GalleryNavigator {
     }
 
     return false;
+  }
+
+  async validateSeriesCompleted(page: Page): Promise<SeriesCompletionResult> {
+    const locators = page.locator(SELECTORS.CHAPTER_LINK);
+    const count = await locators.count();
+
+    if (count === 0) {
+      return { isComplete: false, totalVolumes: 0, completedCount: 0 };
+    }
+
+    let completedCount = 0;
+    for (let i = 0; i < count; i++) {
+      const loc = locators.nth(i);
+      const status = await this.getVolumeStatus(loc);
+      if (status === 'completed') {
+        completedCount++;
+      }
+    }
+
+    const hasNext = await this.hasNextGalleryPage(page);
+    const isComplete = !hasNext && completedCount === count;
+
+    return {
+      isComplete,
+      totalVolumes: count,
+      completedCount,
+    };
   }
 }
