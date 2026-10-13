@@ -8,24 +8,26 @@ import { logger } from '../logger.js';
 export class MangaQueue {
   private entries: MangaEntry[] = [];
 
+  constructor(private filePath: string = QUEUE_FILE_PATH) {}
+
   private async ensureFileExists(): Promise<void> {
     try {
-      await fs.access(QUEUE_FILE_PATH);
+      await fs.access(this.filePath);
     } catch {
-      await atomicWriteJson(QUEUE_FILE_PATH, []);
+      await atomicWriteJson(this.filePath, []);
     }
   }
 
   async load(): Promise<MangaEntry[]> {
     await this.ensureFileExists();
     try {
-      const content = await fs.readFile(QUEUE_FILE_PATH, 'utf-8');
+      const content = await fs.readFile(this.filePath, 'utf-8');
       const parsed = JSON.parse(content);
       this.entries = MangaQueueSchema.parse(parsed) as MangaEntry[];
     } catch (error: any) {
       if (error?.code !== 'ENOENT') {
-        logger.warn({ error }, '⚠️ Corrupted or invalid queue file. Creating backup...');
-        await backupCorruptedFile(QUEUE_FILE_PATH);
+        logger.warn({ error }, '[QUEUE] Corrupted or invalid queue file. Creating backup...');
+        await backupCorruptedFile(this.filePath);
       }
       this.entries = [];
     }
@@ -33,7 +35,7 @@ export class MangaQueue {
   }
 
   async save(): Promise<void> {
-    await atomicWriteJson(QUEUE_FILE_PATH, this.entries);
+    await atomicWriteJson(this.filePath, this.entries);
   }
 
   async add(url: string, title: string): Promise<MangaEntry> {
@@ -56,7 +58,7 @@ export class MangaQueue {
 
     this.entries.push(newEntry);
     await this.save();
-    logger.info(`➕ Manga agregado a la cola: "${title}" (${url})`);
+    logger.info(`[QUEUE] Added series to queue: "${title}" (${url})`);
     return newEntry;
   }
 
@@ -67,7 +69,7 @@ export class MangaQueue {
 
     if (this.entries.length !== initialLength) {
       await this.save();
-      logger.info(`🗑️ Manga eliminado de la cola: ${url}`);
+      logger.info(`[QUEUE] Removed series from queue: ${url}`);
       return true;
     }
 

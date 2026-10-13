@@ -72,8 +72,8 @@ export class SessionOrchestrator {
 
         const currentManga = await this.queue.getNext();
         if (!currentManga) {
-          logger.warn('[QUEUE] The manga queue is empty or all entries are marked as completed.');
-          logger.info('[QUEUE] Add a series via the interactive CLI menu.');
+          logger.warn('[QUEUE] No more series remaining in the reading queue.');
+          logger.info('[SESSION] Ending autonomous reading session and returning to main menu.');
           break;
         }
 
@@ -154,8 +154,12 @@ export class SessionOrchestrator {
                 await this.gallery.goToNextGalleryPage(page);
                 break;
               } else {
-                logger.info(`[GALLERY] Manga "${currentManga.title}" 100% completed!`);
-                await this.queue.updateProgress(currentManga.url, {}, 'completed');
+                const validation = await this.gallery.validateSeriesCompleted(page);
+                if (validation.isComplete) {
+                  await this.handleCompletedSeries(page, currentManga);
+                } else {
+                  logger.warn(`[GALLERY] No pending volumes found for "${currentManga.title}", but not all are verified completed.`);
+                }
                 break;
               }
             }
@@ -201,6 +205,30 @@ export class SessionOrchestrator {
           });
 
           logger.info(`[STATS] Total pages read in this session: ${this.context.pagesReadInCurrentSession}`);
+        }
+
+        if (result.volumeCompleted) {
+          logger.info(`[READER] Volume completed for series "${currentManga.title}". Checking for upcoming volumes...`);
+          await sleep(uglyRandom(1500, 2500));
+
+          if (await this.gallery.isGalleryPage(page)) {
+            const nextCandidate = await this.gallery.findNextVolume(page);
+            const hasNextPage = !nextCandidate && (await this.gallery.hasNextGalleryPage(page));
+
+            if (nextCandidate) {
+              logger.info(
+                `[GALLERY] Next volume ahead found in series: "${nextCandidate.info.title}" [Status: ${nextCandidate.info.status}].`
+              );
+            } else if (hasNextPage) {
+              logger.info('[GALLERY] Checking next catalog page for upcoming volumes...');
+              await this.gallery.goToNextGalleryPage(page);
+            } else {
+              const validation = await this.gallery.validateSeriesCompleted(page);
+              if (validation.isComplete) {
+                await this.handleCompletedSeries(page, currentManga);
+              }
+            }
+          }
         }
         break;
       }
@@ -322,6 +350,27 @@ export class SessionOrchestrator {
       logger.info(`[NAV] Navigating to manga catalog: ${manga.title}...`);
       await page.goto(manga.url, { waitUntil: 'domcontentloaded' });
       await sleep(uglyRandom(2000, 3500));
+    }
+  }
+
+  private async handleCompletedSeries(page: Page, currentManga: MangaEntry): Promise<boolean> {
+    logger.info(`[SERIES] All volumes for "${currentManga.title}" are completed! Series 100% read.`);
+    await this.queue.remove(currentManga.url);
+    logger.info(`[QUEUE] Automatically removed completed series from queue: "${currentManga.title}".`);
+
+    const nextManga = await this.queue.getNext();
+    if (nextManga) {
+      logger.info(
+        `[QUEUE] Next series ahead in queue found: "${nextManga.title}" (${nextManga.url}). Starting next series...`
+      );
+      await page.goto(nextManga.url, { waitUntil: 'domcontentloaded' });
+      await sleep(uglyRandom(2000, 3500));
+      return true;
+    } else {
+      logger.warn('[QUEUE] No more series remaining in the reading queue.');
+      logger.info('[SESSION] Ending autonomous reading session and returning to main menu.');
+      this.isRunning = false;
+      return false;
     }
   }
 
