@@ -4,6 +4,8 @@ import path from 'node:path';
 import { chromium, type BrowserContext, type Page } from 'playwright';
 import { USER_DATA_DIR, BASE_URL, SELECTORS } from '../config/defaults.js';
 import type { AppConfig, RunMode } from '../config/types.js';
+import { ConfigLoader } from '../config/loader.js';
+import { setupGracefulShutdown } from '../utils/signals.js';
 import { logger } from '../logger.js';
 import { sleep } from '../utils/delay.js';
 
@@ -23,7 +25,7 @@ export class BrowserManager {
     await fs.mkdir(USER_DATA_DIR, { recursive: true });
   }
 
-  private buildLaunchArgs(mode: RunMode): string[] {
+  buildLaunchArgs(mode: RunMode): string[] {
     const args = [
       '--disable-blink-features=AutomationControlled',
       '--disable-infobars',
@@ -34,6 +36,8 @@ export class BrowserManager {
 
     if (mode === 'offscreen') {
       args.push('--window-position=-32000,-32000');
+    } else if (mode === 'headed') {
+      args.push('--window-position=50,50');
     }
 
     return args;
@@ -149,49 +153,109 @@ export class BrowserManager {
     return this.activePage;
   }
 
-  async setup(mangaUrl?: string): Promise<void> {
-    await this.ensureDataDir();
+  async setup(mangaUrl?: string, options?: { autoSwitchMode?: boolean }): Promise<void> {
+    const autoSwitch = options?.autoSwitchMode ?? true;
+    let originalMode: RunMode | null = null;
 
-    logger.info('=====================================================');
-    logger.info('[SETUP] Starting manual login setup (visible Chrome window)...');
-    logger.info('[SETUP] Instructions:');
-    logger.info('  1. If Cloudflare asks to verify you are human, click the checkbox.');
-    logger.info('  2. Log in with your account ("CrambleSeles").');
-    logger.info('  3. Once logged in and on the site, close this browser window.');
-    logger.info('=====================================================');
+    if (autoSwitch) {
+      try {
+        const config = await ConfigLoader.load();
+        if (config.runMode !== 'headed') {
+          originalMode = config.runMode;
+          logger.info(
+            `[SETUP] Temporarily switching browser mode from '${originalMode}' to 'headed' for account setup.`
+          );
+          config.runMode = 'headed';
+          await ConfigLoader.save(config);
+        }
+      } catch (err) {
+        logger.warn({ err }, '[SETUP] Could not read/update config for auto mode switch.');
+      }
+    }
 
-    const args = [
-      '--disable-blink-features=AutomationControlled',
-      '--disable-infobars',
-      '--window-size=1280,900',
-    ];
-
-    const launchOptions: Parameters<typeof chromium.launchPersistentContext>[1] = {
-      headless: false,
-      channel: 'chrome',
-      args,
-      ignoreDefaultArgs: ['--enable-automation'],
-      viewport: null,
+    let isRestored = false;
+    const restoreMode = async () => {
+      if (isRestored || !originalMode) return;
+      isRestored = true;
+      try {
+        const latestConfig = await ConfigLoader.load();
+        latestConfig.runMode = originalMode;
+        await ConfigLoader.save(latestConfig);
+        logger.info(`[SETUP] Restored browser mode back to '${originalMode}'.`);
+      } catch (err) {
+        logger.error({ err }, '[SETUP] Failed to restore original browser mode.');
+      }
     };
 
-    const context = await this.launchPersistentWithRetry(launchOptions);
-    this.context = context;
-
-    const pages = context.pages();
-    const firstPage = pages[0];
-    const page = firstPage ?? (await context.newPage());
-    const targetUrl = mangaUrl || BASE_URL;
-    await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
-
-    await new Promise<void>((resolve) => {
-      context.on('close', async () => {
-        logger.info('[SETUP] Browser window closed. Session and tokens saved to ~/.yupmanga/browser-data/');
-        this.context = null;
-        this.activePage = null;
-        await sleep(1000);
-        resolve();
-      });
+    const teardownSignals = setupGracefulShutdown(async () => {
+      await restoreMode();
+      if (this.context) {
+        await this.context.close().catch(() => {});
+      }
     });
+
+    try {
+      await this.ensureDataDir();
+
+      logger.info('=====================================================');
+      logger.info('[SETUP] Starting manual login setup (visible Chrome window)...');
+      logger.info('[SETUP] Instructions:');
+      logger.info('  1. If Cloudflare asks to verify you are human, click the checkbox.');
+      logger.info('  2. Log in with your account ("CrambleSeles").');
+      logger.info('  3. Once logged in and on the site, close this browser window.');
+      logger.info('=====================================================');
+
+      const args = [
+        '--disable-blink-features=AutomationControlled',
+        '--disable-infobars',
+        '--window-size=1280,900',
+        '--window-position=50,50',
+      ];
+
+      const launchOptions: Parameters<typeof chromium.launchPersistentContext>[1] = {
+        headless: false,
+        channel: 'chrome',
+        args,
+        ignoreDefaultArgs: ['--enable-automation'],
+        viewport: null,
+      };
+
+      const context = await this.launchPersistentWithRetry(launchOptions);
+      this.context = context;
+
+      const pages = context.pages();
+      const firstPage = pages[0];
+      const page = firstPage ?? (await context.newPage());
+      const targetUrl = mangaUrl || BASE_URL;
+      await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+
+      await new Promise<void>((resolve) => {
+        let resolved = false;
+        const done = async () => {
+          if (resolved) return;
+          resolved = true;
+          logger.info('[SETUP] Browser window closed. Session and tokens saved to ~/.yupmanga/browser-data/');
+          this.context = null;
+          this.activePage = null;
+          await sleep(1000);
+          resolve();
+        };
+
+        context.on('close', done);
+        page.on('close', async () => {
+          await sleep(500);
+          if (context.pages().filter((p) => !p.isClosed()).length === 0) {
+            try {
+              await context.close();
+            } catch {}
+            await done();
+          }
+        });
+      });
+    } finally {
+      teardownSignals();
+      await restoreMode();
+    }
   }
 
   /**
