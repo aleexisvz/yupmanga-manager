@@ -124,7 +124,7 @@ async function checkAccountStatus(): Promise<void> {
     console.log(chalk.red('\n================================================='));
     console.log(chalk.red('  STATUS: NOT LOGGED IN (ANONYMOUS / GUEST MODE)'));
     console.log(chalk.yellow('  Warning: Progress will NOT be saved to any account!'));
-    console.log(chalk.cyan('  Action: Run "Setup inicial" to log into your account.'));
+    console.log(chalk.cyan('  Action: Run option 8 ("Initial Setup / Sincronizar cuenta") to log into your account.'));
     console.log(chalk.red('=================================================\n'));
   }
 }
@@ -185,6 +185,7 @@ async function showInteractiveMenu(): Promise<void> {
   );
 
   while (true) {
+    config = await ConfigLoader.load();
     const choice = await select({
       message: 'Choose an option:',
       choices: [
@@ -195,7 +196,7 @@ async function showInteractiveMenu(): Promise<void> {
         { name: '5. Remove manga from queue', value: 'remove_manga' },
         { name: '6. View statistics & progress', value: 'stats' },
         { name: '7. Settings (reading speed, runMode)', value: 'config' },
-        { name: '8. Initial Setup (Manual login / Cloudflare)', value: 'setup' },
+        { name: '8. Initial Setup / Sincronizar cuenta (Manual login / Cloudflare)', value: 'setup' },
         { name: '9. Exit', value: 'exit' },
       ],
     });
@@ -360,6 +361,7 @@ async function showInteractiveMenu(): Promise<void> {
       case 'setup': {
         const browser = new BrowserManager();
         await browser.setup();
+        config = await ConfigLoader.load();
         break;
       }
 
