@@ -61,6 +61,29 @@ export class HumanInput {
   }
 
   /**
+   * Scroll de lectura vertical (webtoon): avanza un tramo con ruedas desiguales,
+   * con pequeñas dudas a mitad de camino como cuando alguien lee una viñeta.
+   */
+  async readingScroll(
+    page: Page,
+    totalPixels: number,
+    signal?: AbortSignal,
+    wheelPx: { min: number; max: number } = { min: 45, max: 130 }
+  ): Promise<void> {
+    let scrolled = 0;
+
+    while (scrolled < totalPixels) {
+      const chunk = Math.min(uglyRandom(wheelPx.min, wheelPx.max), totalPixels - scrolled);
+      await page.mouse.wheel(0, chunk);
+      scrolled += chunk;
+
+      // 12% de probabilidad de una mini-duda en medio del gesto
+      const pause = Math.random() < 0.12 ? uglyRandom(180, 520) : uglyRandom(30, 90);
+      await sleep(pause, signal);
+    }
+  }
+
+  /**
    * Simula un scroll exploratorio por una página (baja un poco, pausa, sube, mira)
    */
   async browseScroll(page: Page, durationMs: number): Promise<void> {
