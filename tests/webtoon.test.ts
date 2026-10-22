@@ -1,9 +1,16 @@
 import { describe, it, expect, vi } from 'vitest';
-import { WebtoonReader, pickDominantPage, scrollStepPause, type WebtoonState } from '../src/reader/WebtoonReader.js';
+import {
+  WebtoonReader,
+  pickDominantPage,
+  scrollStepPause,
+  crossedProgressMark,
+  type WebtoonState,
+} from '../src/reader/WebtoonReader.js';
 import { ReaderAutomation } from '../src/reader/ReaderAutomation.js';
 import { parseSeriesType } from '../src/utils/seriesType.js';
 import { MangaEntrySchema } from '../src/config/schemas.js';
 import { DEFAULT_CONFIG, WEBTOON_PACE } from '../src/config/defaults.js';
+import { logger } from '../src/logger.js';
 import type { Page } from 'playwright';
 
 describe('parseSeriesType', () => {
@@ -59,6 +66,17 @@ describe('Webtoon helpers', () => {
     expect(screensPerSecond('fast')).toBeGreaterThan(screensPerSecond('normal') * 1.8);
     expect(screensPerSecond('normal')).toBeGreaterThan(screensPerSecond('slow'));
     expect(screensPerSecond('slow')).toBeGreaterThan(screensPerSecond('very_slow'));
+  });
+});
+
+describe('crossedProgressMark', () => {
+  it('logs the first page and every multiple of 5, even when pages jump', () => {
+    expect(crossedProgressMark(0, 1)).toBe(true);
+    expect(crossedProgressMark(1, 3)).toBe(false);
+    // Jumping 4 -> 6 skips the exact 5 but still crosses the mark
+    expect(crossedProgressMark(4, 6)).toBe(true);
+    expect(crossedProgressMark(9, 11)).toBe(true);
+    expect(crossedProgressMark(11, 13)).toBe(false);
   });
 });
 
@@ -127,5 +145,34 @@ describe('WebtoonReader', () => {
     expect(result.volumeCompleted).toBe(false);
     expect(result.pagesRead).toBe(0);
     expect(closeSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not report a stuck scroll after scrolling up to re-read a panel', async () => {
+    vi.useFakeTimers();
+    // Force the 7% re-read branch (and minimum random sizes) on every step
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.01);
+    const warnSpy = vi.spyOn(logger, 'warn');
+    const { reader } = makeReader();
+    // Each step: state after scrolling up (baseline), then state after scrolling down.
+    // The down step lands above the pre-re-read position, which used to be flagged as stuck.
+    const page = mockPage([
+      state(1, 1000),
+      state(1, 700),
+      state(1, 900),
+      state(1, 600),
+      state(3, 1200, true),
+    ]);
+
+    const promise = reader.readPages(page, 50, fastConfig);
+    await vi.runAllTimersAsync();
+    const result = await promise;
+    vi.useRealTimers();
+    randomSpy.mockRestore();
+
+    const stuckWarnings = warnSpy.mock.calls.filter((c) => String(c[0]).includes('did not advance'));
+    warnSpy.mockRestore();
+    expect(stuckWarnings).toHaveLength(0);
+    expect(result.volumeCompleted).toBe(true);
+    expect(result.pagesRead).toBe(2);
   });
 });
