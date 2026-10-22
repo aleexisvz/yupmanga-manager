@@ -102,6 +102,8 @@ export const SELECTORS = {
   // Reader interface
   READER_PAGE_INFO: 'text=/Página\\s+\\d+\\s+de\\s+\\d+/i',
   READER_CLOSE_BUTTON: 'button:has-text("Cerrar")',
+  // Webtoon mode hides the header (and its Close) while scrolling; this floating button stays on screen
+  READER_WEBTOON_CLOSE_FAB: '#webtoonCloseFab',
   READER_NEXT_BUTTON:
     'button[aria-label="Next"], button[aria-label="Siguiente"], button[aria-label*="next" i], button[aria-label*="siguiente" i], .reader-next, .btn-next, [data-action="next"], button:has-text(">"), button:has-text("›"), button:has-text("»")',
   READER_PREV_BUTTON:

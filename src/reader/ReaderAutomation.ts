@@ -361,7 +361,10 @@ export class ReaderAutomation {
       if (page.isClosed()) return true;
 
       const endPanelOpen = await this.isEndPanelOpen(page);
-      const closeBtn = page.locator(SELECTORS.READER_CLOSE_BUTTON).first();
+      const closeFab = page.locator(SELECTORS.READER_WEBTOON_CLOSE_FAB).first();
+      const closeBtn = (await closeFab.isVisible().catch(() => false))
+        ? closeFab
+        : page.locator(SELECTORS.READER_CLOSE_BUTTON).first();
       const toSeriesBtn = page.locator(SELECTORS.READER_END_PANEL_TO_SERIES).first();
 
       if (endPanelOpen || (await closeBtn.isVisible({ timeout: 2500 }))) {

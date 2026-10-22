@@ -140,7 +140,11 @@ describe('ReaderAutomation.closeReader', () => {
     click: ReturnType<typeof vi.fn>;
   }
 
-  function mockReaderPage(opts: { endPanelVisible: () => boolean; closeClick?: () => Promise<void> }) {
+  function mockReaderPage(opts: {
+    endPanelVisible: () => boolean;
+    closeClick?: () => Promise<void>;
+    webtoonFabVisible?: boolean;
+  }) {
     const buttons: Record<string, MockButton> = {
       [SELECTORS.READER_END_PANEL]: {
         isVisible: vi.fn().mockImplementation(() => Promise.resolve(opts.endPanelVisible())),
@@ -149,6 +153,10 @@ describe('ReaderAutomation.closeReader', () => {
       [SELECTORS.READER_CLOSE_BUTTON]: {
         isVisible: vi.fn().mockResolvedValue(true),
         click: vi.fn().mockImplementation(opts.closeClick ?? (() => Promise.resolve())),
+      },
+      [SELECTORS.READER_WEBTOON_CLOSE_FAB]: {
+        isVisible: vi.fn().mockResolvedValue(opts.webtoonFabVisible ?? false),
+        click: vi.fn().mockResolvedValue(undefined),
       },
       [SELECTORS.READER_END_PANEL_TO_SERIES]: {
         isVisible: vi.fn().mockResolvedValue(true),
@@ -165,6 +173,7 @@ describe('ReaderAutomation.closeReader', () => {
       page,
       closeBtn: buttons[SELECTORS.READER_CLOSE_BUTTON]!,
       toSeriesBtn: buttons[SELECTORS.READER_END_PANEL_TO_SERIES]!,
+      closeFab: buttons[SELECTORS.READER_WEBTOON_CLOSE_FAB]!,
     };
   }
 
@@ -184,6 +193,13 @@ describe('ReaderAutomation.closeReader', () => {
     expect(await runClose(page)).toBe(true);
     expect(closeBtn.click).toHaveBeenCalledOnce();
     expect(toSeriesBtn.click).not.toHaveBeenCalled();
+  });
+
+  it('uses the floating webtoon close button, since the header hides while scrolling', async () => {
+    const { page, closeBtn, closeFab } = mockReaderPage({ endPanelVisible: () => false, webtoonFabVisible: true });
+    expect(await runClose(page)).toBe(true);
+    expect(closeFab.click).toHaveBeenCalledOnce();
+    expect(closeBtn.click).not.toHaveBeenCalled();
   });
 
   it('leaves through "Ir a la ficha" when the end-of-series panel covers the reader', async () => {
