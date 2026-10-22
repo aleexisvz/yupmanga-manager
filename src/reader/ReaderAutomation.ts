@@ -397,7 +397,10 @@ export class ReaderAutomation {
         return true;
       }
       return false;
-    } catch {
+    } catch (error: any) {
+      // Playwright's reason (e.g. "<div ...> intercepts pointer events") says what blocked the click
+      const reason = String(error?.message ?? error).split('\n').slice(0, 4).join(' | ');
+      logger.warn(`[READER] Close click failed: ${reason}`);
       return false;
     }
   }
