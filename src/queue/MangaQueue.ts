@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import { QUEUE_FILE_PATH } from '../config/defaults.js';
 import { MangaQueueSchema } from '../config/schemas.js';
-import type { MangaEntry } from '../config/types.js';
+import type { MangaEntry, SeriesType } from '../config/types.js';
 import { atomicWriteJson, backupCorruptedFile } from '../utils/fileSystem.js';
 import { logger } from '../logger.js';
 
@@ -38,12 +38,13 @@ export class MangaQueue {
     await atomicWriteJson(this.filePath, this.entries);
   }
 
-  async add(url: string, title: string): Promise<MangaEntry> {
+  async add(url: string, title: string, type?: SeriesType): Promise<MangaEntry> {
     await this.load();
 
     const existing = this.entries.find((m) => m.url === url);
     if (existing) {
       existing.status = 'queued';
+      if (type) existing.type = type;
       await this.save();
       return existing;
     }
@@ -51,6 +52,7 @@ export class MangaQueue {
     const newEntry: MangaEntry = {
       url,
       title,
+      type,
       priority: this.entries.length + 1,
       status: 'queued',
       addedAt: new Date().toISOString(),
@@ -102,6 +104,15 @@ export class MangaQueue {
     }
 
     return null;
+  }
+
+  async setType(url: string, type: SeriesType): Promise<void> {
+    await this.load();
+    const entry = this.entries.find((m) => m.url === url);
+    if (entry && entry.type !== type) {
+      entry.type = type;
+      await this.save();
+    }
   }
 
   async updateProgress(

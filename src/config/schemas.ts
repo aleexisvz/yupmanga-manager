@@ -49,6 +49,8 @@ export const AppConfigSchema = z.object({
   antiDetection: AntiDetectionConfigSchema.default(DEFAULT_CONFIG.antiDetection),
 });
 
+export const SeriesTypeSchema = z.enum(['manga', 'manhwa', 'novel']);
+
 export const MangaStatusSchema = z.enum(['queued', 'reading', 'paused', 'completed']);
 
 export const MangaProgressSchema = z.object({
@@ -61,6 +63,7 @@ export const MangaProgressSchema = z.object({
 export const MangaEntrySchema = z.object({
   url: z.string().url().or(z.string().min(1)),
   title: z.string().min(1),
+  type: SeriesTypeSchema.optional(),
   priority: z.number().int().default(1),
   status: MangaStatusSchema.default('queued'),
   addedAt: z.string().default(() => new Date().toISOString()),

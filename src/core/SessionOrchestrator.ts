@@ -2,6 +2,7 @@ import type { Page } from 'playwright';
 import { BrowserManager } from '../browser/BrowserManager.js';
 import { GalleryNavigator } from '../navigator/GalleryNavigator.js';
 import { ReaderAutomation } from '../reader/ReaderAutomation.js';
+import { WebtoonReader } from '../reader/WebtoonReader.js';
 import { BrowsingSimulator } from '../behavior/BrowsingSimulator.js';
 import { ActionScheduler, type SessionContext } from '../behavior/ActionScheduler.js';
 import { MangaQueue } from '../queue/MangaQueue.js';
@@ -9,12 +10,14 @@ import { ProgressTracker } from '../storage/ProgressTracker.js';
 import type { AppConfig, MangaEntry } from '../config/types.js';
 import { SELECTORS } from '../config/defaults.js';
 import { logger } from '../logger.js';
+import { SERIES_TYPE_LABELS } from '../utils/seriesType.js';
 import { sleep, uglyRandom } from '../utils/delay.js';
 
 export class SessionOrchestrator {
   private isRunning = false;
   private isStopping = false;
   private abortController: AbortController | null = null;
+  private webtoon: WebtoonReader;
   private context: SessionContext = {
     pagesReadInCurrentSession: 0,
     sessionStartTime: Date.now(),
@@ -33,7 +36,9 @@ export class SessionOrchestrator {
     private queue: MangaQueue,
     private tracker: ProgressTracker,
     private config: AppConfig
-  ) {}
+  ) {
+    this.webtoon = new WebtoonReader(reader);
+  }
 
   async start(): Promise<void> {
     this.isRunning = true;
@@ -123,6 +128,21 @@ export class SessionOrchestrator {
           if (!resolved) return;
         }
 
+        if (!currentManga.type && (await this.gallery.isGalleryPage(page))) {
+          const detected = await this.gallery.detectSeriesType(page);
+          if (detected) {
+            currentManga.type = detected;
+            await this.queue.setType(currentManga.url, detected);
+            logger.info(`[SERIES] Detected series type for "${currentManga.title}": ${SERIES_TYPE_LABELS[detected]}`);
+          }
+        }
+
+        if (currentManga.type === 'novel') {
+          logger.warn(`[SERIES] "${currentManga.title}" is a novel, which is not supported yet. Pausing it in the queue.`);
+          await this.queue.updateProgress(currentManga.url, {}, 'paused');
+          break;
+        }
+
         let activeReaderPage = page;
 
         // Check if there is already an open reader popup in the browser context
@@ -185,7 +205,12 @@ export class SessionOrchestrator {
         }
 
         // Execute reading block on the active reader page
-        const result = await this.reader.readPages(activeReaderPage, pagesToRead, this.config, signal);
+        // Manhwa chapters use the vertical webtoon reader; everything else pages horizontally
+        const useWebtoon =
+          currentManga.type === 'manhwa' || (await this.webtoon.isWebtoonReader(activeReaderPage));
+        const result = useWebtoon
+          ? await this.webtoon.readPages(activeReaderPage, pagesToRead, this.config, signal)
+          : await this.reader.readPages(activeReaderPage, pagesToRead, this.config, signal);
 
         this.context.pagesReadInCurrentSession += result.pagesRead;
 

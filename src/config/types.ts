@@ -56,6 +56,8 @@ export interface AppConfig {
   antiDetection: AntiDetectionConfig;
 }
 
+export type SeriesType = 'manga' | 'manhwa' | 'novel';
+
 export type VolumeStatus = 'completed' | 'in-progress' | 'not-started' | 'unknown';
 
 export interface PageInfo {
@@ -72,6 +74,7 @@ export interface VolumeInfo {
 export interface MangaEntry {
   url: string;
   title: string;
+  type?: SeriesType;
   priority: number;
   status: 'queued' | 'reading' | 'paused' | 'completed';
   addedAt: string;

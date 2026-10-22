@@ -49,6 +49,40 @@ export const SPEED_PROFILES: Record<ReadingSpeed, SpeedProfile> = {
   },
 };
 
+// Webtoon (manhwa) pacing. Manhwa page images are very tall (~10,000 px, about 12 screens),
+// so the pace depends on seconds per screen, how far each scroll gesture travels
+// (fraction of the viewport) and the size of each wheel tick.
+// 'normal' keeps the pace measured with the first webtoon reader (~25 s per page);
+// 'fast' reads roughly twice as quick.
+export interface WebtoonPace {
+  screenSeconds: { min: number; max: number };
+  stepFraction: { min: number; max: number };
+  wheelPx: { min: number; max: number };
+}
+
+export const WEBTOON_PACE: Record<ReadingSpeed, WebtoonPace> = {
+  fast: {
+    screenSeconds: { min: 0.2, max: 0.4 },
+    stepFraction: { min: 0.55, max: 0.95 },
+    wheelPx: { min: 90, max: 200 },
+  },
+  normal: {
+    screenSeconds: { min: 0.8, max: 1.3 },
+    stepFraction: { min: 0.3, max: 0.65 },
+    wheelPx: { min: 45, max: 130 },
+  },
+  slow: {
+    screenSeconds: { min: 1.6, max: 2.4 },
+    stepFraction: { min: 0.3, max: 0.6 },
+    wheelPx: { min: 45, max: 120 },
+  },
+  very_slow: {
+    screenSeconds: { min: 2.8, max: 4.0 },
+    stepFraction: { min: 0.25, max: 0.5 },
+    wheelPx: { min: 40, max: 110 },
+  },
+};
+
 export const SELECTORS = {
   // Gallery and volumes
   CHAPTER_LINK: 'a.chapter-link',

@@ -1,6 +1,7 @@
 import type { Page, Locator } from 'playwright';
 import { SELECTORS } from '../config/defaults.js';
-import type { VolumeInfo, VolumeStatus } from '../config/types.js';
+import type { SeriesType, VolumeInfo, VolumeStatus } from '../config/types.js';
+import { parseSeriesType } from '../utils/seriesType.js';
 import { logger } from '../logger.js';
 import { sleep, uglyRandom } from '../utils/delay.js';
 
@@ -242,5 +243,16 @@ export class GalleryNavigator {
       totalVolumes: count,
       completedCount,
     };
+  }
+
+  /**
+   * Detects whether the open series page is a manga, manhwa or novel from its page title
+   */
+  async detectSeriesType(page: Page): Promise<SeriesType | null> {
+    try {
+      return parseSeriesType(await page.title());
+    } catch {
+      return null;
+    }
   }
 }

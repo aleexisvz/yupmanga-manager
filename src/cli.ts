@@ -12,7 +12,8 @@ import { ProgressTracker } from './storage/ProgressTracker.js';
 import { SessionOrchestrator } from './core/SessionOrchestrator.js';
 import { ConfigLoader } from './config/loader.js';
 import { SPEED_PROFILES } from './config/defaults.js';
-import type { ReadingSpeed } from './config/types.js';
+import type { ReadingSpeed, SeriesType } from './config/types.js';
+import { SERIES_TYPE_LABELS } from './utils/seriesType.js';
 import { setupGracefulShutdown } from './utils/signals.js';
 import { logger } from './logger.js';
 
@@ -217,8 +218,9 @@ async function showInteractiveMenu(): Promise<void> {
           console.log(chalk.gray('  (Queue is currently empty)\n'));
         } else {
           entries.forEach((m, idx) => {
+            const type = m.type ? SERIES_TYPE_LABELS[m.type] : 'Auto';
             console.log(
-              `  ${idx + 1}. ${chalk.bold(m.title)} [${chalk.green(m.status)}] - ${chalk.gray(m.url)}`
+              `  ${idx + 1}. ${chalk.bold(m.title)} ${chalk.magenta(`(${type})`)} [${chalk.green(m.status)}] - ${chalk.gray(m.url)}`
             );
           });
           console.log('');
@@ -235,7 +237,16 @@ async function showInteractiveMenu(): Promise<void> {
           message: 'Manga title/name:',
           default: url.split('/').filter(Boolean).pop() || 'Manga',
         });
-        await queue.add(url, title);
+        const type = await select<SeriesType | 'auto'>({
+          message: 'Series type:',
+          choices: [
+            { name: 'Auto-detect on first visit (recommended)', value: 'auto' },
+            { name: 'Manga (horizontal pages)', value: 'manga' },
+            { name: 'Manhwa (vertical scroll)', value: 'manhwa' },
+            { name: 'Novel (not supported yet)', value: 'novel' },
+          ],
+        });
+        await queue.add(url, title, type === 'auto' ? undefined : type);
         console.log(chalk.green(`\nSuccessfully added "${title}" to queue.\n`));
         break;
       }
