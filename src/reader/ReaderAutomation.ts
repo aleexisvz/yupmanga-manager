@@ -344,17 +344,47 @@ export class ReaderAutomation {
     await page.keyboard.press(key);
   }
 
+  /**
+   * On a series' last chapter the site opens a "Has llegado al final" dialog whose backdrop
+   * covers the reader (and its Close button). It is dismissed through "Ir a la ficha".
+   */
+  async isEndPanelOpen(page: Page): Promise<boolean> {
+    return page
+      .locator(SELECTORS.READER_END_PANEL)
+      .first()
+      .isVisible()
+      .catch(() => false);
+  }
+
   async closeReader(page: Page): Promise<boolean> {
     try {
       if (page.isClosed()) return true;
 
+      const endPanelOpen = await this.isEndPanelOpen(page);
       const closeBtn = page.locator(SELECTORS.READER_CLOSE_BUTTON).first();
-      if (await closeBtn.isVisible({ timeout: 2500 })) {
-        logger.info('[READER] Clicking Close to return to gallery...');
+      const toSeriesBtn = page.locator(SELECTORS.READER_END_PANEL_TO_SERIES).first();
+
+      if (endPanelOpen || (await closeBtn.isVisible({ timeout: 2500 }))) {
+        logger.info(
+          endPanelOpen
+            ? '[READER] End-of-series panel open. Clicking "Ir a la ficha" to return to gallery...'
+            : '[READER] Clicking Close to return to gallery...'
+        );
         await sleep(uglyRandom(800, 1600));
 
         const closePromise = page.waitForEvent('close', { timeout: 4000 }).catch(() => null);
-        await closeBtn.click();
+        if (endPanelOpen) {
+          await toSeriesBtn.click({ timeout: 5000 });
+        } else {
+          try {
+            await closeBtn.click({ timeout: 5000 });
+          } catch (error) {
+            // The end panel can pop up between the visibility check and the click
+            if (!(await this.isEndPanelOpen(page))) throw error;
+            logger.info('[READER] End-of-series panel covered Close. Clicking "Ir a la ficha" instead...');
+            await toSeriesBtn.click({ timeout: 5000 });
+          }
+        }
         await closePromise;
 
         if (!page.isClosed()) {

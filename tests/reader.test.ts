@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ReaderAutomation } from '../src/reader/ReaderAutomation.js';
-import { DEFAULT_CONFIG } from '../src/config/defaults.js';
+import { DEFAULT_CONFIG, SELECTORS } from '../src/config/defaults.js';
 import type { Page } from 'playwright';
 
 describe('ReaderAutomation unit tests', () => {
@@ -134,3 +134,76 @@ describe('ReaderAutomation unit tests', () => {
   });
 });
 
+describe('ReaderAutomation.closeReader', () => {
+  interface MockButton {
+    isVisible: ReturnType<typeof vi.fn>;
+    click: ReturnType<typeof vi.fn>;
+  }
+
+  function mockReaderPage(opts: { endPanelVisible: () => boolean; closeClick?: () => Promise<void> }) {
+    const buttons: Record<string, MockButton> = {
+      [SELECTORS.READER_END_PANEL]: {
+        isVisible: vi.fn().mockImplementation(() => Promise.resolve(opts.endPanelVisible())),
+        click: vi.fn(),
+      },
+      [SELECTORS.READER_CLOSE_BUTTON]: {
+        isVisible: vi.fn().mockResolvedValue(true),
+        click: vi.fn().mockImplementation(opts.closeClick ?? (() => Promise.resolve())),
+      },
+      [SELECTORS.READER_END_PANEL_TO_SERIES]: {
+        isVisible: vi.fn().mockResolvedValue(true),
+        click: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+    const page = {
+      isClosed: () => false,
+      locator: vi.fn().mockImplementation((selector: string) => ({ first: () => buttons[selector] })),
+      waitForEvent: vi.fn().mockResolvedValue(null),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Page;
+    return {
+      page,
+      closeBtn: buttons[SELECTORS.READER_CLOSE_BUTTON]!,
+      toSeriesBtn: buttons[SELECTORS.READER_END_PANEL_TO_SERIES]!,
+    };
+  }
+
+  async function runClose(page: Page) {
+    const reader = new ReaderAutomation();
+    vi.spyOn(reader, 'handleAdIfPresent').mockResolvedValue(false);
+    vi.useFakeTimers();
+    const promise = reader.closeReader(page);
+    await vi.runAllTimersAsync();
+    const closed = await promise;
+    vi.useRealTimers();
+    return closed;
+  }
+
+  it('clicks Close when no end-of-series panel is open', async () => {
+    const { page, closeBtn, toSeriesBtn } = mockReaderPage({ endPanelVisible: () => false });
+    expect(await runClose(page)).toBe(true);
+    expect(closeBtn.click).toHaveBeenCalledOnce();
+    expect(toSeriesBtn.click).not.toHaveBeenCalled();
+  });
+
+  it('leaves through "Ir a la ficha" when the end-of-series panel covers the reader', async () => {
+    const { page, closeBtn, toSeriesBtn } = mockReaderPage({ endPanelVisible: () => true });
+    expect(await runClose(page)).toBe(true);
+    expect(toSeriesBtn.click).toHaveBeenCalledOnce();
+    expect(closeBtn.click).not.toHaveBeenCalled();
+  });
+
+  it('falls back to "Ir a la ficha" when the panel appears just before clicking Close', async () => {
+    let panelOpen = false;
+    const { page, toSeriesBtn } = mockReaderPage({
+      endPanelVisible: () => panelOpen,
+      closeClick: () => {
+        // The backdrop pops up and intercepts the click until it times out
+        panelOpen = true;
+        return Promise.reject(new Error('Timeout 5000ms exceeded: element intercepts pointer events'));
+      },
+    });
+    expect(await runClose(page)).toBe(true);
+    expect(toSeriesBtn.click).toHaveBeenCalledOnce();
+  });
+});

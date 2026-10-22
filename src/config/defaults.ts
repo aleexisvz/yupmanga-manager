@@ -106,6 +106,9 @@ export const SELECTORS = {
     'button[aria-label="Next"], button[aria-label="Siguiente"], button[aria-label*="next" i], button[aria-label*="siguiente" i], .reader-next, .btn-next, [data-action="next"], button:has-text(">"), button:has-text("›"), button:has-text("»")',
   READER_PREV_BUTTON:
     'button[aria-label="Prev"], button[aria-label="Anterior"], button[aria-label*="prev" i], button[aria-label*="anterior" i], .reader-prev, .btn-prev, [data-action="prev"], button:has-text("<"), button:has-text("‹"), button:has-text("«")',
+  // "Has llegado al final" dialog (ReaderEndPanel.js) shown at the end of a series' last chapter
+  READER_END_PANEL: '.rep-backdrop .rep-dialog',
+  READER_END_PANEL_TO_SERIES: '.rep-dialog button:has-text("Ir a la ficha")',
   READER_READY_INDICATORS: 'button:has-text("Cerrar"), text=/Página\\s+\\d+\\s+de\\s+\\d+/i',
 
   // Site navigation

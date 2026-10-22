@@ -111,6 +111,28 @@ export class WebtoonReader {
     }
   }
 
+  /**
+   * Fallback exit when the reader could not be closed through its buttons: staying inside
+   * a finished chapter would make the next cycle "complete" it again forever.
+   */
+  private async leaveToSeriesPage(page: Page): Promise<void> {
+    try {
+      const seriesPath = await page.evaluate(() => {
+        const id = (window as unknown as { currentSeriesId?: string }).currentSeriesId;
+        return id ? `/series.php?id=${encodeURIComponent(id)}` : null;
+      });
+      if (!seriesPath) {
+        logger.warn('[WEBTOON] Could not close the reader and the series page is unknown.');
+        return;
+      }
+      logger.warn('[WEBTOON] Could not close the reader. Navigating back to the series page...');
+      await page.goto(new URL(seriesPath, page.url()).toString(), { waitUntil: 'domcontentloaded' });
+      await sleep(uglyRandom(1500, 2500));
+    } catch (err) {
+      logger.debug({ err }, '[WEBTOON] Failed to navigate back to the series page');
+    }
+  }
+
   private async waitForReader(page: Page): Promise<WebtoonState | null> {
     for (let attempt = 0; attempt < 8; attempt++) {
       const state = await this.getState(page);
@@ -167,7 +189,9 @@ export class WebtoonReader {
         await sleep(screenSeconds * 1000 * uglyRandom(1, 1.8), signal);
         logger.info(`[WEBTOON] End of chapter reached (Page ${state.currentPage} of ${state.totalPages}).`);
         volumeCompleted = true;
-        await this.reader.closeReader(page);
+        if (!(await this.reader.closeReader(page))) {
+          await this.leaveToSeriesPage(page);
+        }
         break;
       }
 
