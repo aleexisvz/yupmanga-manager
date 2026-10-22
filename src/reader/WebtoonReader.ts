@@ -55,6 +55,14 @@ export function scrollStepPause(screenSeconds: number, stepPx: number, viewportH
  * Reader for vertical-scroll series (manhwa / webtoon). The site disables keyboard
  * navigation in this mode and tracks progress by the image in view, saving it on each page change.
  */
+/**
+ * True when the page count crossed a multiple of `every` (pages can jump by more than one
+ * per scroll step, so an exact `% every === 0` check would skip progress logs)
+ */
+export function crossedProgressMark(before: number, after: number, every = 5): boolean {
+  return before === 0 || Math.floor(after / every) > Math.floor(before / every);
+}
+
 export class WebtoonReader {
   private input = new HumanInput();
 
@@ -164,9 +172,12 @@ export class WebtoonReader {
       }
 
       // Occasionally scroll back up a little to re-read a panel
+      let baselineScrollY = state.scrollY;
       if (Math.random() < 0.07) {
         await this.input.smoothScroll(page, 'up', uglyRandom(120, 300));
         await sleep(uglyRandom(1000, 2600), signal);
+        // Measure the next step from where the re-read left us, not from before it
+        baselineScrollY = (await this.getState(page))?.scrollY ?? baselineScrollY;
       }
 
       const stepPx = state.viewportHeight * uglyRandom(pace.stepFraction.min, pace.stepFraction.max);
@@ -180,7 +191,7 @@ export class WebtoonReader {
         continue;
       }
 
-      if (next.scrollY <= state.scrollY && !next.atBottom) {
+      if (next.scrollY <= baselineScrollY && !next.atBottom) {
         stuckCount++;
         logger.warn(
           `[WEBTOON] Scroll did not advance at Page ${next.currentPage} of ${next.totalPages} (Attempt ${stuckCount}/${MAX_STUCK_RETRIES}).`
@@ -191,10 +202,14 @@ export class WebtoonReader {
         }
         await sleep(1500, signal);
       } else {
+        if (stuckCount > 0) {
+          logger.info(`[WEBTOON] Scroll resumed at Page ${next.currentPage} of ${next.totalPages}.`);
+        }
         stuckCount = 0;
       }
 
       if (next.currentPage > state.currentPage) {
+        const pagesBefore = pagesRead;
         pagesRead += next.currentPage - state.currentPage;
         // New image in view: draw a fresh reading pace for it
         screenSeconds = drawScreenSeconds();
@@ -202,7 +217,7 @@ export class WebtoonReader {
         if (Math.random() < 0.1) {
           await sleep(uglyRandom(2000, 5000), signal);
         }
-        if (pagesRead === 1 || pagesRead % 5 === 0) {
+        if (crossedProgressMark(pagesBefore, pagesRead)) {
           logger.info(
             `[WEBTOON] Progress: Page ${next.currentPage} of ${next.totalPages} (Session: ${pagesRead}/${targetPagesCount} pages)`
           );
