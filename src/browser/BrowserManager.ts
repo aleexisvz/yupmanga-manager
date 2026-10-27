@@ -8,6 +8,7 @@ import { ConfigLoader } from '../config/loader.js';
 import { setupGracefulShutdown } from '../utils/signals.js';
 import { logger } from '../logger.js';
 import { sleep } from '../utils/delay.js';
+import { parseHeaderStreak, parseProfileStats } from '../utils/profileStats.js';
 
 export interface AuthStatus {
   isLoggedIn: boolean;
@@ -347,14 +348,10 @@ export class BrowserManager {
           const headerUserEl = document.querySelector(sel.HEADER_USER);
           const rawHeaderUsername = headerUserEl ? headerUserEl.textContent?.trim() : null;
 
-          // Extract streak from header if present
+          // Header streak badge: title "Racha actual: 70 días. Récord: 70 días.", text "70"
           const headerStreakEl = document.querySelector(sel.HEADER_STREAK_COUNT);
-        let headerStreak = '';
-        if (headerStreakEl) {
-          const titleAttr = headerStreakEl.getAttribute('title') || '';
-          const m = titleAttr.match(/Racha actual:\s*(\d+)/i) || headerStreakEl.textContent?.match(/(\d+)/);
-          if (m) headerStreak = `${m[1]} dias`;
-        }
+          const headerStreakTitle = headerStreakEl?.getAttribute('title') || '';
+          const headerStreakText = headerStreakEl?.textContent?.trim() || '';
 
         const isLoggedIn = isDataLoggedIn || hasStreakTopline || (!!profileLink && !loginLink);
 
@@ -362,7 +359,8 @@ export class BrowserManager {
           isLoggedIn,
           hasLogin: !!loginLink,
           headerUsername: rawHeaderUsername,
-          headerStreak,
+          headerStreakTitle,
+          headerStreakText,
         };
       }, {
         PROFILE_LINKS: SELECTORS.PROFILE_LINKS,
@@ -377,7 +375,10 @@ export class BrowserManager {
       }
 
       let username = !this.isGenericProfileText(homeAuth.headerUsername) ? homeAuth.headerUsername! : '';
-      let streak = homeAuth.headerStreak || '';
+      // The header badge is the authoritative streak; /perfil is only a fallback
+      const headerStreak =
+        parseHeaderStreak(homeAuth.headerStreakTitle) || homeAuth.headerStreakText.match(/^\d+$/)?.[0] || '';
+      let streak = headerStreak ? `${headerStreak} dias` : '';
       let caps = '';
       let series = '';
 
@@ -391,7 +392,7 @@ export class BrowserManager {
         }
 
         if (!(await this.isCloudflareBlocked(page))) {
-          const profileStats = await page.evaluate(() => {
+          const profilePage = await page.evaluate(() => {
             const bodyText = document.body.innerText;
 
             // Extract username from h1 or profile heading
@@ -403,28 +404,16 @@ export class BrowserManager {
               if (statsMatch?.[1]) profileUser = statsMatch[1].trim();
             }
 
-            // Extract reading stats
-            let s = '';
-            const sMatch = bodyText.match(/(\d+)\s*d[ií]as\s*Racha\s*actual/i) || bodyText.match(/Racha.*?(\d+)\s*d[ií]as/i);
-            if (sMatch?.[1]) s = `${sMatch[1]} dias`;
-
-            let c = '';
-            const cMatch = bodyText.match(/(\d+)\s*Caps/i);
-            if (cMatch?.[1]) c = cMatch[1];
-
-            let ser = '';
-            const serMatch = bodyText.match(/(\d+)\s*Series/i);
-            if (serMatch?.[1]) ser = serMatch[1];
-
-            return { profileUser, s, c, ser };
+            return { profileUser, bodyText };
           });
 
-          if (profileStats.profileUser && !this.isGenericProfileText(profileStats.profileUser)) {
-            username = profileStats.profileUser;
+          if (profilePage.profileUser && !this.isGenericProfileText(profilePage.profileUser)) {
+            username = profilePage.profileUser;
           }
-          if (profileStats.s) streak = profileStats.s;
-          if (profileStats.c) caps = profileStats.c;
-          if (profileStats.ser) series = profileStats.ser;
+          const profileStats = parseProfileStats(profilePage.bodyText);
+          if (!streak && profileStats.streak) streak = `${profileStats.streak} dias`;
+          if (profileStats.caps) caps = profileStats.caps;
+          if (profileStats.series) series = profileStats.series;
         }
       } catch (err) {
         logger.debug({ err }, '[AUTH] Could not fetch details from /perfil');
