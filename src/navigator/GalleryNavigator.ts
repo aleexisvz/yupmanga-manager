@@ -250,7 +250,22 @@ export class GalleryNavigator {
    */
   async detectSeriesType(page: Page): Promise<SeriesType | null> {
     try {
-      return parseSeriesType(await page.title());
+      // Some series titles say "Leer Manhwa Online", others only "<name> - YupManga"
+      const fromTitle = parseSeriesType(await page.title());
+      if (fromTitle) return fromTitle;
+
+      // The series info row carries a format label ("Webtoon"). Labels inside links belong
+      // to the "Series similares" cards of other series, so they are ignored.
+      const formatLabel = await page.evaluate(() => {
+        const label = Array.from(document.querySelectorAll('body span, body div, body p')).find(
+          (el) =>
+            el.children.length === 0 &&
+            !el.closest('a') &&
+            /^(webtoon|manhwa|manhua|novela|novel)$/i.test((el.textContent || '').trim())
+        );
+        return label?.textContent?.trim() ?? null;
+      });
+      return parseSeriesType(formatLabel);
     } catch {
       return null;
     }

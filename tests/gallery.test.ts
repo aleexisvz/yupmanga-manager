@@ -121,3 +121,27 @@ describe('GalleryNavigator - Series Completion Validation', () => {
   });
 });
 
+
+describe('GalleryNavigator - Series type detection', () => {
+  const pageWith = (title: string, formatLabel: string | null) =>
+    ({
+      title: vi.fn().mockResolvedValue(title),
+      evaluate: vi.fn().mockResolvedValue(formatLabel),
+    }) as unknown as Page;
+
+  it('uses the page title when it names the type', async () => {
+    const page = pageWith('Mi querida enemiga en Español - Leer Manhwa Online | YupManga', 'Webtoon');
+    expect(await new GalleryNavigator().detectSeriesType(page)).toBe('manhwa');
+    expect(page.evaluate).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the "Webtoon" format label when the title has no type', async () => {
+    const page = pageWith('Estrella Ballena: La sirena de Gyeongseong - YupManga', 'Webtoon');
+    expect(await new GalleryNavigator().detectSeriesType(page)).toBe('manhwa');
+  });
+
+  it('returns null when neither the title nor a format label names the type', async () => {
+    const page = pageWith('Algo - YupManga', null);
+    expect(await new GalleryNavigator().detectSeriesType(page)).toBeNull();
+  });
+});
