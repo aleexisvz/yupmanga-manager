@@ -207,7 +207,7 @@ export class SessionOrchestrator {
         // Execute reading block on the active reader page
         // Manhwa chapters use the vertical webtoon reader; everything else pages horizontally
         const useWebtoon =
-          currentManga.type === 'manhwa' || (await this.webtoon.isWebtoonReader(activeReaderPage));
+          currentManga.type === 'manhwa' || (await this.detectWebtoonReader(activeReaderPage, currentManga));
         const result = useWebtoon
           ? await this.webtoon.readPages(activeReaderPage, pagesToRead, this.config, signal)
           : await this.reader.readPages(activeReaderPage, pagesToRead, this.config, signal);
@@ -297,6 +297,29 @@ export class SessionOrchestrator {
         this.context.lastBreakTimestamp = Date.now();
         break;
     }
+  }
+
+  /**
+   * Asks the site reader whether it runs in webtoon mode. The entry ad (box-modal) has no
+   * reader yet, so it is passed first and the reader gets a few seconds to boot.
+   * A positive answer is stored so the series is treated as a manhwa from now on.
+   */
+  private async detectWebtoonReader(readerPage: Page, manga: MangaEntry): Promise<boolean> {
+    await this.reader.handlePreReaderAd(readerPage);
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const state = await this.webtoon.getState(readerPage);
+      if (state) {
+        if (state.isWebtoon && !manga.type) {
+          manga.type = 'manhwa';
+          await this.queue.setType(manga.url, 'manhwa');
+          logger.info(`[SERIES] Webtoon reader detected for "${manga.title}". Saved series type: Manhwa`);
+        }
+        return state.isWebtoon;
+      }
+      await sleep(1500);
+    }
+    return false;
   }
 
   private async closeAnyOpenReader(page: Page): Promise<void> {
