@@ -260,10 +260,13 @@ async function showInteractiveMenu(): Promise<void> {
           message: 'Enter manga URL on yupmanga.com:',
           validate: (val) => (val.includes('yupmanga.com') ? true : 'Must be a yupmanga.com URL'),
         });
-        console.log(chalk.cyan('\n[QUEUE] Reading series title from the page...'));
+        const divider = chalk.gray('─'.repeat(48));
+        console.log(`\n${divider}`);
+        console.log(chalk.cyan('[QUEUE] Reading series title from the page...'));
         const title =
           (await detectSeriesTitle(url)) ?? url.split('/').filter(Boolean).pop() ?? 'Manga';
-        console.log(chalk.gray(`  Title: ${title}`));
+        console.log(chalk.green(`  Title found: ${chalk.bold(title)}`));
+        console.log(`${divider}\n`);
         const type = await select<SeriesType | 'auto'>({
           message: 'Series type:',
           choices: [
