@@ -14,6 +14,7 @@ import { ConfigLoader } from './config/loader.js';
 import { SPEED_PROFILES } from './config/defaults.js';
 import type { ReadingSpeed, SeriesType } from './config/types.js';
 import { SERIES_TYPE_LABELS } from './utils/seriesType.js';
+import { parseSeriesTitle } from './utils/seriesTitle.js';
 import { setupGracefulShutdown } from './utils/signals.js';
 import { logger } from './logger.js';
 
@@ -104,6 +105,29 @@ program
       process.exit(1);
     }
   });
+
+/**
+ * Opens the series page in the browser and reads its title. Returns null when the title
+ * cannot be read, so the caller can fall back to the URL slug.
+ */
+async function detectSeriesTitle(url: string): Promise<string | null> {
+  const config = await ConfigLoader.load();
+  const browser = new BrowserManager();
+  try {
+    const page = await browser.launch(config);
+    await page.goto(url.startsWith('http') ? url : `https://${url}`, { waitUntil: 'domcontentloaded' });
+    // Give a Cloudflare challenge a moment to clear before reading the title
+    await page
+      .waitForFunction(() => !document.title.includes('Just a moment'), undefined, { timeout: 15000 })
+      .catch(() => {});
+    return parseSeriesTitle(await page.title());
+  } catch (error) {
+    logger.warn({ error }, '[QUEUE] Could not read the series title from the page');
+    return null;
+  } finally {
+    await browser.close();
+  }
+}
 
 async function checkAccountStatus(): Promise<void> {
   const config = await ConfigLoader.load();
@@ -233,10 +257,10 @@ async function showInteractiveMenu(): Promise<void> {
           message: 'Enter manga URL on yupmanga.com:',
           validate: (val) => (val.includes('yupmanga.com') ? true : 'Must be a yupmanga.com URL'),
         });
-        const title = await input({
-          message: 'Manga title/name:',
-          default: url.split('/').filter(Boolean).pop() || 'Manga',
-        });
+        console.log(chalk.cyan('\n[QUEUE] Reading series title from the page...'));
+        const title =
+          (await detectSeriesTitle(url)) ?? url.split('/').filter(Boolean).pop() ?? 'Manga';
+        console.log(chalk.gray(`  Title: ${title}`));
         const type = await select<SeriesType | 'auto'>({
           message: 'Series type:',
           choices: [
