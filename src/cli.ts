@@ -107,8 +107,9 @@ program
   });
 
 /**
- * Opens the series page in the browser and reads its title. Returns null when the title
- * cannot be read, so the caller can fall back to the URL slug.
+ * Opens the series page in the browser and reads its title from the page heading, falling
+ * back to the page title. Returns null when neither can be read, so the caller can fall
+ * back to the URL slug.
  */
 async function detectSeriesTitle(url: string): Promise<string | null> {
   const config = await ConfigLoader.load();
@@ -116,11 +117,13 @@ async function detectSeriesTitle(url: string): Promise<string | null> {
   try {
     const page = await browser.launch(config);
     await page.goto(url.startsWith('http') ? url : `https://${url}`, { waitUntil: 'domcontentloaded' });
-    // Give a Cloudflare challenge a moment to clear before reading the title
-    await page
-      .waitForFunction(() => !document.title.includes('Just a moment'), undefined, { timeout: 15000 })
-      .catch(() => {});
-    return parseSeriesTitle(await page.title());
+    // Waits up to 15s, which also gives a Cloudflare challenge time to clear
+    const heading = await page
+      .locator('main h1')
+      .first()
+      .textContent({ timeout: 15000 })
+      .catch(() => null);
+    return heading?.trim() || parseSeriesTitle(await page.title());
   } catch (error) {
     logger.warn({ error }, '[QUEUE] Could not read the series title from the page');
     return null;
