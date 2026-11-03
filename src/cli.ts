@@ -385,6 +385,11 @@ async function showInteractiveMenu(): Promise<void> {
 
 if (process.argv.length <= 2) {
   showInteractiveMenu().catch((err) => {
+    // Ctrl+C at a prompt throws ExitPromptError: treat it like choosing "Exit".
+    if (err instanceof Error && err.name === 'ExitPromptError') {
+      console.log(chalk.gray('\nGoodbye!\n'));
+      process.exit(0);
+    }
     logger.error({ err }, 'Error in interactive menu');
   });
 } else {
