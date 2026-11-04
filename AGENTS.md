@@ -1,33 +1,34 @@
 # AGENTS.md
 
-Guía para agentes (Claude Code, Codex, etc.) que trabajan en este repositorio.
+Guide for agents (Claude Code, Codex, etc.) working in this repository.
 
-## Flujo de Git
+## Git workflow
 
-### En el repositorio local: libertad total
-- Puedes hacer todos los commits que quieras, y crear o borrar ramas.
-- **Cada cambio importante va en una rama nueva** creada desde `main` actualizado (por ejemplo `feat/...`, `fix/...`, `test/...`). No hagas commits de cambios importantes directamente en `main`.
-- Usa mensajes de commit en formato Conventional Commits (`feat(scope): ...`, `fix: ...`, `test: ...`), siguiendo el historial existente.
+### Local work: free
+- Make as many commits as you need, and create or delete branches.
+- Every change goes in a new branch created from an up-to-date `main` (for example `feat/...`, `fix/...`, `test/...`). Never commit important changes directly to `main`.
+- Use Conventional Commits (`feat(scope): ...`, `fix: ...`, `test: ...`), following the existing history.
+- Update the docs in the same branch when behavior or commands change.
 
-### Antes de hacer push: consultar siempre
-- **Nunca hagas `git push` sin la aprobación explícita del usuario.**
-- Antes de hacer push, avisa de que los cambios están listos e indica la rama, los commits y cómo probarlos. Luego espera a que el usuario los pruebe y apruebe el push.
-- La aprobación vale para ese push concreto, no para los siguientes.
+### Approval gate: push, PR and merge in one decision
+- When the change is ready locally, stop and tell the user the branch, the commits, and how to test them. Ask for one decision covering the push, the PR and the merge.
+- On approval, do all of it in one pass: push the branch, open the PR with the full description, merge it with a merge commit, update local `main`, and delete the feature branch both locally and on the remote.
+- Never push, open a PR or merge before that approval. An approval covers that change only, not later ones.
+- If the user asks for only part of the flow (for example, just the push), do only that part.
 
-### Pull Requests y merges
-- Todo cambio llega a `main` mediante un **Pull Request**; nunca con push directo a `main`.
-- El PR debe estar bien documentado:
-  - **Summary**: qué problema resuelve.
-  - **What changed**: los cambios principales.
-  - **Reviewer notes**: decisiones, riesgos y limitaciones.
-  - **Testing**: qué se probó (typecheck, tests, prueba real) y qué no.
-- Haz el merge solo cuando el usuario lo pida. Usa un **merge commit**, como en el historial (`<título del PR> (#N)`), con un cuerpo que resuma los cambios del PR.
-- Después del merge, actualiza `main` en local.
+### Pull requests
+- Every change reaches `main` through a Pull Request. Never push directly to `main`.
+- The PR description has these sections:
+  - **Summary**: what problem it solves.
+  - **What changed**: the main changes.
+  - **Reviewer notes**: decisions, risks and limitations.
+  - **Testing**: what was verified (typecheck, tests, real run) and what was not.
+- Merge with a merge commit, following the history: the subject is `<PR title> (#N)`, and the body summarizes the PR's changes.
 
-## Comandos útiles
+## Useful commands
 
 ```bash
-npm run dev      # CLI interactiva
+npm run dev      # Interactive CLI
 npm test         # vitest
 npx tsc --noEmit # typecheck
 ```
