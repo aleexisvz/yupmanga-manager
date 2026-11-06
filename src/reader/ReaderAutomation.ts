@@ -12,6 +12,14 @@ export interface ReadingSessionResult {
   volumeCompleted: boolean;
 }
 
+/**
+ * True only when a visible "Cerrar" button exists. The site also ships hidden ones (e.g. the
+ * closed "cartas" drawer, present on every page), which must not count as the reader.
+ */
+export async function hasVisibleCloseButton(page: Page): Promise<boolean> {
+  return (await page.locator(SELECTORS.READER_CLOSE_BUTTON).filter({ visible: true }).count()) > 0;
+}
+
 export class ReaderAutomation {
   /**
    * Universal interstitial ad handler (handles both entry ads and exit ads)
@@ -154,7 +162,7 @@ export class ReaderAutomation {
       }
 
       // Close button is unique to the reader modal
-      const hasCloseBtn = (await page.locator(SELECTORS.READER_CLOSE_BUTTON).count()) > 0;
+      const hasCloseBtn = await hasVisibleCloseButton(page);
       if (hasCloseBtn) {
         return true;
       }
