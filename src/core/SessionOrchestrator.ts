@@ -1,7 +1,7 @@
 import type { Page } from 'playwright';
 import { BrowserManager } from '../browser/BrowserManager.js';
 import { GalleryNavigator } from '../navigator/GalleryNavigator.js';
-import { ReaderAutomation } from '../reader/ReaderAutomation.js';
+import { ReaderAutomation, type ReadingSessionResult } from '../reader/ReaderAutomation.js';
 import { WebtoonReader } from '../reader/WebtoonReader.js';
 import { BrowsingSimulator } from '../behavior/BrowsingSimulator.js';
 import { ActionScheduler, type SessionContext } from '../behavior/ActionScheduler.js';
@@ -13,11 +13,16 @@ import { logger } from '../logger.js';
 import { SERIES_TYPE_LABELS } from '../utils/seriesType.js';
 import { sleep, uglyRandom } from '../utils/delay.js';
 
+/** Consecutive reading blocks that read 0 pages before a series is paused instead of retried forever */
+const MAX_EMPTY_BLOCKS = 3;
+
 export class SessionOrchestrator {
   private isRunning = false;
   private isStopping = false;
   private abortController: AbortController | null = null;
   private webtoon: WebtoonReader;
+  /** Consecutive empty reading blocks per series URL (in memory, reset on restart) */
+  private emptyBlocks = new Map<string, number>();
   private context: SessionContext = {
     pagesReadInCurrentSession: 0,
     sessionStartTime: Date.now(),
@@ -208,11 +213,38 @@ export class SessionOrchestrator {
         // Manhwa chapters use the vertical webtoon reader; everything else pages horizontally
         const useWebtoon =
           currentManga.type === 'manhwa' || (await this.detectWebtoonReader(activeReaderPage, currentManga));
-        const result = useWebtoon
-          ? await this.webtoon.readPages(activeReaderPage, pagesToRead, this.config, signal)
-          : await this.reader.readPages(activeReaderPage, pagesToRead, this.config, signal);
+        let result = await this.readBlock(activeReaderPage, pagesToRead, useWebtoon, signal);
+
+        // Series without a saved type may be the other reader: if nothing was read, try the other mode once
+        if (result.pagesRead === 0 && !currentManga.type && !signal?.aborted) {
+          logger.info('[READER] No pages read with this reader. Trying the other reader mode...');
+          const alternative = await this.readBlock(activeReaderPage, pagesToRead, !useWebtoon, signal);
+          if (alternative.pagesRead > 0) {
+            result = alternative;
+            if (!useWebtoon) {
+              currentManga.type = 'manhwa';
+              await this.queue.setType(currentManga.url, 'manhwa');
+              logger.info(`[SERIES] Webtoon reader worked for "${currentManga.title}". Saved series type: Manhwa`);
+            }
+          }
+        }
 
         this.context.pagesReadInCurrentSession += result.pagesRead;
+
+        if (result.pagesRead === 0 && !result.volumeCompleted) {
+          const emptyBlocks = (this.emptyBlocks.get(currentManga.url) ?? 0) + 1;
+          this.emptyBlocks.set(currentManga.url, emptyBlocks);
+          if (emptyBlocks >= MAX_EMPTY_BLOCKS) {
+            this.emptyBlocks.delete(currentManga.url);
+            logger.error(
+              `[READER] "${currentManga.title}" read 0 pages in ${emptyBlocks} blocks in a row. Pausing it in the queue; open it in the browser to check it, then resume it manually.`
+            );
+            await this.queue.updateProgress(currentManga.url, {}, 'paused');
+            break;
+          }
+        } else {
+          this.emptyBlocks.delete(currentManga.url);
+        }
 
         if (result.pagesRead > 0) {
           await this.tracker.recordSession(
@@ -320,6 +352,17 @@ export class SessionOrchestrator {
       await sleep(1500);
     }
     return false;
+  }
+
+  private readBlock(
+    page: Page,
+    pagesToRead: number,
+    webtoon: boolean,
+    signal?: AbortSignal
+  ): Promise<ReadingSessionResult> {
+    return webtoon
+      ? this.webtoon.readPages(page, pagesToRead, this.config, signal)
+      : this.reader.readPages(page, pagesToRead, this.config, signal);
   }
 
   private async closeAnyOpenReader(page: Page): Promise<void> {

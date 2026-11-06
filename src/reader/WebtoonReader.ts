@@ -4,6 +4,7 @@ import type { AppConfig } from '../config/types.js';
 import { HumanInput } from '../behavior/HumanInput.js';
 import { logger } from '../logger.js';
 import { sleep, uglyRandom, getTimeMultiplier } from '../utils/delay.js';
+import { captureReaderDiagnostics } from '../utils/readerDiagnostics.js';
 import type { ReaderAutomation, ReadingSessionResult } from './ReaderAutomation.js';
 
 // Top-level `const` declared by the site reader script (ReaderCore.js); not a window property
@@ -159,6 +160,7 @@ export class WebtoonReader {
     const initial = await this.waitForReader(page);
     if (!initial) {
       logger.warn('[WEBTOON] Cannot detect webtoon page images. Checking if stuck on ad or block page...');
+      await captureReaderDiagnostics(page, 'webtoon-reader');
       return { pagesRead: 0, currentPage: 1, totalPages: 1, volumeCompleted: false };
     }
 

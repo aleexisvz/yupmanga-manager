@@ -1,5 +1,6 @@
 import type { Page, Locator } from 'playwright';
 import { SELECTORS } from '../config/defaults.js';
+import { hasVisibleCloseButton } from '../reader/ReaderAutomation.js';
 import type { SeriesType, VolumeInfo, VolumeStatus } from '../config/types.js';
 import { parseSeriesType } from '../utils/seriesType.js';
 import { logger } from '../logger.js';
@@ -22,7 +23,7 @@ export class GalleryNavigator {
       if (page.isClosed()) return false;
 
       // If reader close button is present, the page is inside the reader modal
-      const hasCloseBtn = (await page.locator(SELECTORS.READER_CLOSE_BUTTON).count()) > 0;
+      const hasCloseBtn = await hasVisibleCloseButton(page);
       if (hasCloseBtn) return false;
 
       const url = page.url();

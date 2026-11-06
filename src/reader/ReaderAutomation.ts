@@ -3,12 +3,21 @@ import { SELECTORS, SPEED_PROFILES } from '../config/defaults.js';
 import type { AppConfig, PageInfo } from '../config/types.js';
 import { logger } from '../logger.js';
 import { sleep, uglyRandom, getTimeMultiplier, calculatePageDelay } from '../utils/delay.js';
+import { captureReaderDiagnostics } from '../utils/readerDiagnostics.js';
 
 export interface ReadingSessionResult {
   pagesRead: number;
   currentPage: number;
   totalPages: number;
   volumeCompleted: boolean;
+}
+
+/**
+ * True only when a visible "Cerrar" button exists. The site also ships hidden ones (e.g. the
+ * closed "cartas" drawer, present on every page), which must not count as the reader.
+ */
+export async function hasVisibleCloseButton(page: Page): Promise<boolean> {
+  return (await page.locator(SELECTORS.READER_CLOSE_BUTTON).filter({ visible: true }).count()) > 0;
 }
 
 export class ReaderAutomation {
@@ -153,7 +162,7 @@ export class ReaderAutomation {
       }
 
       // Close button is unique to the reader modal
-      const hasCloseBtn = (await page.locator(SELECTORS.READER_CLOSE_BUTTON).count()) > 0;
+      const hasCloseBtn = await hasVisibleCloseButton(page);
       if (hasCloseBtn) {
         return true;
       }
@@ -468,6 +477,7 @@ export class ReaderAutomation {
 
     if (!initialInfo) {
       logger.warn('[READER] Cannot detect reader page indicator. Checking if stuck on ad or block page...');
+      await captureReaderDiagnostics(page, 'paginated-reader');
       return {
         pagesRead: 0,
         currentPage: 1,
