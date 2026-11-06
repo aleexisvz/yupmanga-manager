@@ -3,6 +3,7 @@ import { SELECTORS, SPEED_PROFILES } from '../config/defaults.js';
 import type { AppConfig, PageInfo } from '../config/types.js';
 import { logger } from '../logger.js';
 import { sleep, uglyRandom, getTimeMultiplier, calculatePageDelay } from '../utils/delay.js';
+import { captureReaderDiagnostics } from '../utils/readerDiagnostics.js';
 
 export interface ReadingSessionResult {
   pagesRead: number;
@@ -468,6 +469,7 @@ export class ReaderAutomation {
 
     if (!initialInfo) {
       logger.warn('[READER] Cannot detect reader page indicator. Checking if stuck on ad or block page...');
+      await captureReaderDiagnostics(page, 'paginated-reader');
       return {
         pagesRead: 0,
         currentPage: 1,
