@@ -16,9 +16,9 @@ export const SPEED_PROFILES: Record<ReadingSpeed, SpeedProfile> = {
     name: 'Rápido',
     icon: '⚡',
     description: 'Escaneo veloz y hojear páginas',
-    minSeconds: 3,
-    maxSeconds: 6,
-    badge: '~3-6 seg',
+    minSeconds: 4,
+    maxSeconds: 7,
+    badge: '~4-7 seg',
   },
   normal: {
     id: 'normal',

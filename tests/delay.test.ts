@@ -30,10 +30,10 @@ describe('Delay & Randomization Calculations', () => {
     it('should calculate delay within expected range for fast preset', () => {
       for (let i = 0; i < 30; i++) {
         const { delayMs, delaySeconds } = calculatePageDelay('fast', 1.0, false);
-        expect(delayMs).toBeGreaterThanOrEqual(3000);
-        expect(delayMs).toBeLessThanOrEqual(6000);
-        expect(delaySeconds).toBeGreaterThanOrEqual(3.0);
-        expect(delaySeconds).toBeLessThanOrEqual(6.0);
+        expect(delayMs).toBeGreaterThanOrEqual(4000);
+        expect(delayMs).toBeLessThanOrEqual(7000);
+        expect(delaySeconds).toBeGreaterThanOrEqual(4.0);
+        expect(delaySeconds).toBeLessThanOrEqual(7.0);
       }
     });
 
