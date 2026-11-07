@@ -18,7 +18,8 @@ Aplicación autónoma inteligente para simulación de lectura y navegación real
   - Navegación entre volúmenes y paginación de galería.
 - 📋 **Cola de Mangas y Persistencia**:
   - Cola de lectura priorizada (`~/.yupmanga/queue.json`).
-  - Al añadir un manga solo se pide la URL: el título se lee automáticamente de la página de la serie (si no se puede leer, se usa el slug de la URL), y después se elige el tipo (auto, manga, manhwa).
+  - Al añadir un manga solo se pide la URL: el título se lee automáticamente de la página de la serie (si no se puede leer, se usa el slug de la URL), y después se elige el tipo (auto, manga, manhwa, comic).
+  - **Comic (BETA):** se detecta por el título de la página ("Leer Comic Online") y se lee con el lector paginado de izquierda a derecha. Si `readingDirection` está fijado en `rtl` o `ltr`, esa opción manda sobre el tipo.
   - Seguimiento de progreso por manga (`~/.yupmanga/progress.json`).
 - 💻 **CLI Interactiva**: Menús claros con `@inquirer/prompts` para gestionar mangas, configurar y ejecutar.
 
