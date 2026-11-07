@@ -273,6 +273,7 @@ async function showInteractiveMenu(): Promise<void> {
             { name: 'Auto-detect on first visit (recommended)', value: 'auto' },
             { name: 'Manga (horizontal pages)', value: 'manga' },
             { name: 'Manhwa (vertical scroll)', value: 'manhwa' },
+            { name: 'Comic (BETA, left to right)', value: 'comic' },
             { name: 'Novel (not supported yet)', value: 'novel' },
           ],
         });

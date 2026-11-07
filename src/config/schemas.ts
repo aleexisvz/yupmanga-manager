@@ -49,7 +49,7 @@ export const AppConfigSchema = z.object({
   antiDetection: AntiDetectionConfigSchema.default(DEFAULT_CONFIG.antiDetection),
 });
 
-export const SeriesTypeSchema = z.enum(['manga', 'manhwa', 'novel']);
+export const SeriesTypeSchema = z.enum(['manga', 'manhwa', 'novel', 'comic']);
 
 export const MangaStatusSchema = z.enum(['queued', 'reading', 'paused', 'completed']);
 

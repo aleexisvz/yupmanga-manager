@@ -20,6 +20,18 @@ export async function hasVisibleCloseButton(page: Page): Promise<boolean> {
   return (await page.locator(SELECTORS.READER_CLOSE_BUTTON).filter({ visible: true }).count()) > 0;
 }
 
+/**
+ * Direction fixed before looking at the page: an explicit global setting wins, then the series
+ * type (comics). Returns null when the page itself has to decide.
+ */
+export function resolveFixedDirection(
+  configDirection: 'auto' | 'rtl' | 'ltr' | undefined,
+  seriesDirection: 'rtl' | 'ltr' | undefined
+): 'rtl' | 'ltr' | null {
+  if (configDirection === 'rtl' || configDirection === 'ltr') return configDirection;
+  return seriesDirection ?? null;
+}
+
 export class ReaderAutomation {
   /**
    * Universal interstitial ad handler (handles both entry ads and exit ads)
@@ -420,11 +432,16 @@ export class ReaderAutomation {
   /**
    * Reads a block of pages with periodic feedback and safety checks
    */
+  /**
+   * @param seriesDirection Direction implied by the series type (comics read left to right).
+   *   An explicit global direction in the config still takes precedence over it.
+   */
   async readPages(
     page: Page,
     targetPagesCount: number,
     config: AppConfig,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    seriesDirection?: 'rtl' | 'ltr'
   ): Promise<ReadingSessionResult> {
     await this.handlePreReaderAd(page);
 
@@ -489,13 +506,11 @@ export class ReaderAutomation {
     lastInfo = initialInfo;
     logger.info(`[READER] Reader active: Page ${initialInfo.currentPage} of ${initialInfo.totalPages}`);
 
-    // Resolve initial reading direction (default to RTL for manga, which maps forward to ArrowLeft)
+    // Resolve initial reading direction: explicit config > series type > page hints > RTL (manga)
     let activeDirection: 'rtl' | 'ltr' =
-      config.readingDirection === 'rtl'
-        ? 'rtl'
-        : config.readingDirection === 'ltr'
-          ? 'ltr'
-          : (await this.detectDomReadingDirection(page)) || 'rtl';
+      resolveFixedDirection(config.readingDirection, seriesDirection) ||
+      (await this.detectDomReadingDirection(page)) ||
+      'rtl';
 
     logger.info(`[READER] Initial reading orientation: [${activeDirection.toUpperCase()}]`);
 

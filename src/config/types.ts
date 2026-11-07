@@ -56,7 +56,7 @@ export interface AppConfig {
   antiDetection: AntiDetectionConfig;
 }
 
-export type SeriesType = 'manga' | 'manhwa' | 'novel';
+export type SeriesType = 'manga' | 'manhwa' | 'novel' | 'comic';
 
 export type VolumeStatus = 'completed' | 'in-progress' | 'not-started' | 'unknown';
 

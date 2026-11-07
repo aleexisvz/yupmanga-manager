@@ -262,7 +262,7 @@ export class GalleryNavigator {
           (el) =>
             el.children.length === 0 &&
             !el.closest('a') &&
-            /^(webtoon|manhwa|manhua|novela|novel)$/i.test((el.textContent || '').trim())
+            /^(webtoon|manhwa|manhua|novela|novel|c[oó]mic)$/i.test((el.textContent || '').trim())
         );
         return label?.textContent?.trim() ?? null;
       });

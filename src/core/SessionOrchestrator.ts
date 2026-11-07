@@ -210,10 +210,22 @@ export class SessionOrchestrator {
         }
 
         // Execute reading block on the active reader page
-        // Manhwa chapters use the vertical webtoon reader; everything else pages horizontally
+        // Comics (BETA) use the paginated reader read left to right; manhwa chapters use the
+        // vertical webtoon reader; everything else pages horizontally
+        const isComic = currentManga.type === 'comic';
+        if (isComic) {
+          logger.info(`[COMIC] Reading "${currentManga.title}" left to right (BETA).`);
+        }
         const useWebtoon =
-          currentManga.type === 'manhwa' || (await this.detectWebtoonReader(activeReaderPage, currentManga));
-        let result = await this.readBlock(activeReaderPage, pagesToRead, useWebtoon, signal);
+          !isComic &&
+          (currentManga.type === 'manhwa' || (await this.detectWebtoonReader(activeReaderPage, currentManga)));
+        let result = await this.readBlock(
+          activeReaderPage,
+          pagesToRead,
+          useWebtoon,
+          signal,
+          isComic ? 'ltr' : undefined
+        );
 
         // Series without a saved type may be the other reader: if nothing was read, try the other mode once
         if (result.pagesRead === 0 && !currentManga.type && !signal?.aborted) {
@@ -358,11 +370,12 @@ export class SessionOrchestrator {
     page: Page,
     pagesToRead: number,
     webtoon: boolean,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    seriesDirection?: 'rtl' | 'ltr'
   ): Promise<ReadingSessionResult> {
     return webtoon
       ? this.webtoon.readPages(page, pagesToRead, this.config, signal)
-      : this.reader.readPages(page, pagesToRead, this.config, signal);
+      : this.reader.readPages(page, pagesToRead, this.config, signal, seriesDirection);
   }
 
   private async closeAnyOpenReader(page: Page): Promise<void> {
